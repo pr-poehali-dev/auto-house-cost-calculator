@@ -54,6 +54,7 @@ def mat_row(r):
         "id":r[0],"item_type":r[1],"category":r[2],"name":r[3],"unit":r[4],
         "price_per_unit":float(r[5]),"qty_formula":r[6],"article":r[7],"description":r[8],
         "best_price":float(r[9]) if r[9] else None,"best_price_updated_at":str(r[10]) if r[10] else None,
+        "best_price_supplier":r[14] if len(r) > 14 else None,
         "sort_order":r[11],"is_active":r[12],"updated_at":str(r[13])
     }
 
@@ -109,10 +110,13 @@ def handler(event: dict, context) -> dict:
         cat = qs.get("category","")
         item_type = qs.get("item_type","")
         q = (f"SELECT m.id,m.item_type,m.category,m.name,m.unit,m.price_per_unit,m.qty_formula,"
-             f"m.article,m.description,m.best_price,m.best_price_updated_at,m.sort_order,m.is_active,m.updated_at "
-             f"FROM {S}.materials m WHERE 1=1")
+             f"m.article,m.description,m.best_price,m.best_price_updated_at,m.sort_order,m.is_active,m.updated_at,"
+             f"sup.company_name "
+             f"FROM {S}.materials m "
+             f"LEFT JOIN {S}.suppliers sup ON sup.id=m.best_price_supplier_id "
+             f"WHERE 1=1")
         params = []
-        if not staff: q += " AND m.is_active=TRUE"  # поставщик видит только активные
+        if not staff: q += " AND m.is_active=TRUE"
         if cat: q += " AND m.category=%s"; params.append(cat)
         if item_type: q += " AND m.item_type=%s"; params.append(item_type)
         q += " ORDER BY m.category,m.sort_order,m.id"
@@ -122,13 +126,40 @@ def handler(event: dict, context) -> dict:
         # Добавляем предложения поставщиков если запрошено
         if qs.get("with_offers") == "1" and staff and role in STAFF_EDIT_ROLES:
             for item in items:
+                # price_offers (ручные предложения)
                 cur.execute(
-                    f"SELECT po.id,po.supplier_id,s.company_name,po.price,po.location,po.note,po.updated_at "
+                    f"SELECT po.id,po.supplier_id,s.company_name,po.price,po.location,po.note,po.updated_at,'offer' as src "
                     f"FROM {S}.price_offers po JOIN {S}.suppliers s ON s.id=po.supplier_id "
-                    f"WHERE po.material_id=%s AND po.is_active=TRUE ORDER BY po.price ASC",
+                    f"WHERE po.material_id=%s AND po.is_active=TRUE",
                     (item["id"],))
-                item["offers"] = [{"id":r[0],"supplier_id":r[1],"company":r[2],"price":float(r[3]),
-                                   "location":r[4],"note":r[5],"updated_at":str(r[6])} for r in cur.fetchall()]
+                offers = [{"id":r[0],"supplier_id":r[1],"company":r[2],"price":float(r[3]),
+                           "location":r[4],"note":r[5],"updated_at":str(r[6]),"source":"offer"}
+                          for r in cur.fetchall()]
+                # supplier_price_list (прайсы поставщиков по точному имени)
+                cur.execute(
+                    f"SELECT DISTINCT ON (pl.supplier_id) pl.supplier_id, s.company_name, "
+                    f"pl.price_per_unit, pl.valid_from, pl.note "
+                    f"FROM {S}.supplier_price_list pl "
+                    f"JOIN {S}.suppliers s ON s.id=pl.supplier_id "
+                    f"WHERE LOWER(pl.material_name)=LOWER(%s) AND s.is_active=TRUE "
+                    f"ORDER BY pl.supplier_id, pl.price_per_unit ASC",
+                    (item["name"],))
+                for r in cur.fetchall():
+                    sup_id = r[0]
+                    if not any(o["supplier_id"] == sup_id and o["source"] == "offer" for o in offers):
+                        offers.append({"id": f"pl_{sup_id}_{item['id']}","supplier_id":sup_id,
+                                       "company":r[1],"price":float(r[2]),
+                                       "location":"","note":r[4] or "",
+                                       "updated_at":str(r[3]),"source":"pricelist"})
+                offers.sort(key=lambda o: o["price"])
+                item["offers"] = offers
+                # Обновляем best_price из прайс-листа если он лучше текущего
+                if offers and (item["best_price"] is None or offers[0]["price"] < item["best_price"]):
+                    cur.execute(
+                        f"UPDATE {S}.materials SET best_price=%s, best_price_supplier_id=%s, best_price_updated_at=NOW() WHERE id=%s",
+                        (offers[0]["price"], offers[0]["supplier_id"], item["id"]))
+                    item["best_price"] = offers[0]["price"]
+                    item["best_price_supplier"] = offers[0]["company"]
         cur.close(); conn.close()
         return resp({"items": items})
 
@@ -212,15 +243,36 @@ def handler(event: dict, context) -> dict:
         mid = qs.get("material_id")
         if not mid: conn.close(); return resp({"error":"material_id обязателен"}, 400)
         cur = conn.cursor()
+        # Ручные предложения
         cur.execute(
             f"SELECT po.id,po.supplier_id,s.company_name,s.region,po.price,po.location,po.note,po.updated_at "
             f"FROM {S}.price_offers po JOIN {S}.suppliers s ON s.id=po.supplier_id "
-            f"WHERE po.material_id=%s AND po.is_active=TRUE ORDER BY po.price ASC",
+            f"WHERE po.material_id=%s AND po.is_active=TRUE",
             (mid,))
-        rows = cur.fetchall(); cur.close(); conn.close()
-        return resp({"offers":[{"id":r[0],"supplier_id":r[1],"company":r[2],"region":r[3],
-                                "price":float(r[4]),"location":r[5],"note":r[6],"updated_at":str(r[7])}
-                               for r in rows]})
+        offers = [{"id":r[0],"supplier_id":r[1],"company":r[2],"region":r[3],
+                   "price":float(r[4]),"location":r[5],"note":r[6],"updated_at":str(r[7]),"source":"offer"}
+                  for r in cur.fetchall()]
+        # Цены из прайс-листа по имени материала
+        cur.execute(f"SELECT name FROM {S}.materials WHERE id=%s", (mid,))
+        mrow = cur.fetchone()
+        if mrow:
+            cur.execute(
+                f"SELECT DISTINCT ON (pl.supplier_id) pl.supplier_id, s.company_name, s.region, "
+                f"pl.price_per_unit, pl.valid_from, pl.note "
+                f"FROM {S}.supplier_price_list pl "
+                f"JOIN {S}.suppliers s ON s.id=pl.supplier_id "
+                f"WHERE LOWER(pl.material_name)=LOWER(%s) AND s.is_active=TRUE "
+                f"ORDER BY pl.supplier_id, pl.price_per_unit ASC",
+                (mrow[0],))
+            for r in cur.fetchall():
+                sup_id = r[0]
+                if not any(o["supplier_id"] == sup_id for o in offers):
+                    offers.append({"id":f"pl_{sup_id}_{mid}","supplier_id":sup_id,"company":r[1],
+                                   "region":r[2],"price":float(r[3]),"location":"",
+                                   "note":r[5] or "","updated_at":str(r[4]),"source":"pricelist"})
+        offers.sort(key=lambda o: o["price"])
+        cur.close(); conn.close()
+        return resp({"offers": offers})
 
     # ── GET мои предложения (для поставщика) ──────────────────────────────────
     if method == "GET" and action == "my_offers" and supplier:

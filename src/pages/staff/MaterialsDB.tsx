@@ -11,13 +11,15 @@ interface Material {
   id: number; item_type: string; category: string; name: string; unit: string;
   price_per_unit: number; qty_formula: string; article: string; description: string;
   best_price: number | null; best_price_updated_at: string | null;
+  best_price_supplier: string | null;
   sort_order: number; is_active: boolean; updated_at: string;
   offers?: Offer[];
 }
 
 interface Offer {
-  id: number; supplier_id: number; company: string; region?: string;
+  id: number | string; supplier_id: number; company: string; region?: string;
   price: number; location: string; note: string; updated_at: string;
+  source?: "offer" | "pricelist";
 }
 
 interface AiItem {
@@ -62,14 +64,27 @@ function OffersPanel({ material, token, role, onAccept }: { material: Material; 
   const best = offers[0];
   const saving = best.price < material.price_per_unit ? material.price_per_unit - best.price : 0;
 
+  const fmtDate = (d: string) => { try { return new Date(d).toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit", year:"numeric" }); } catch { return d; } };
+
   return (
     <div className="space-y-2">
       {offers.map(o => (
-        <div key={o.id} className="flex items-center justify-between px-3 py-2 rounded-lg"
+        <div key={String(o.id)} className="flex items-center justify-between px-3 py-2 rounded-lg"
           style={{ background: o.id === best.id ? "rgba(0,255,136,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${o.id === best.id ? "rgba(0,255,136,0.2)" : "rgba(255,255,255,0.06)"}` }}>
-          <div>
-            <div className="text-xs font-medium text-white">{o.company}</div>
-            <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>{o.location || o.region || "—"} {o.note ? `· ${o.note}` : ""}</div>
+          <div className="flex items-center gap-2">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-white">{o.company}</span>
+                {o.source === "pricelist" && (
+                  <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background:"rgba(0,212,255,0.12)", color:"var(--neon-cyan)", fontSize:"10px" }}>прайс</span>
+                )}
+              </div>
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                {o.location || o.region || ""}
+                {o.note ? ` · ${o.note}` : ""}
+                {o.updated_at ? ` · ${fmtDate(o.updated_at)}` : ""}
+              </div>
+            </div>
           </div>
           <div className="text-right">
             <div className="font-display font-bold text-sm" style={{ color: o.id === best.id ? "var(--neon-green)" : "rgba(255,255,255,0.7)" }}>
@@ -542,6 +557,14 @@ export default function MaterialsDB({ user, token, onImportToSpec }: {
                               {item.best_price < item.price_per_unit && (
                                 <div className="text-xs" style={{ color:"var(--neon-green)" }}>
                                   −{fmt(item.price_per_unit - item.best_price)}
+                                </div>
+                              )}
+                              {item.best_price_supplier && (
+                                <div className="text-xs mt-0.5 truncate max-w-28" style={{ color:"rgba(255,255,255,0.35)" }}>{item.best_price_supplier}</div>
+                              )}
+                              {item.best_price_updated_at && (
+                                <div className="text-xs" style={{ color:"rgba(255,255,255,0.2)" }}>
+                                  {new Date(item.best_price_updated_at).toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit", year:"numeric" })}
                                 </div>
                               )}
                             </div>
