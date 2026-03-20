@@ -31,8 +31,8 @@ CATS_HINTS = """Подсказки по категориям:
 - Стройматериалы: кирпич, блок газобетонный, блок керамический, пеноблок, шлакоблок, песок, щебень, гравий, бетон, цемент, плита перекрытия, кольцо стеновое, ГКЛ, гипсокартон, брусчатка"""
 
 def ai_classify_materials(items: list) -> list:
-    """GPT-4o-mini: определяет категорию и нормализует единицу измерения для каждой позиции"""
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    """DeepSeek: определяет категорию и нормализует единицу измерения для каждой позиции"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key or not items:
         return items
     names = "\n".join(f"{i+1}. {it.get('name','')}" for i, it in enumerate(items))
@@ -53,8 +53,8 @@ def ai_classify_materials(items: list) -> list:
 Верни ТОЛЬКО JSON-массив (без пояснений), по одному объекту на каждую позицию:
 [{{"idx":1,"category":"...","unit":"...","name_clean":"..."}}]"""
     try:
-        data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],"temperature":0.1,"max_tokens":2000}, ensure_ascii=False).encode()
-        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+        data = json.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],"temperature":0.1,"max_tokens":2000}, ensure_ascii=False).encode()
+        req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=data,
             headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
         with urllib.request.urlopen(req, timeout=30) as r:
             result = json.loads(r.read())

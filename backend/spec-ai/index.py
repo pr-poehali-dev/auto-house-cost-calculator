@@ -56,7 +56,7 @@ SPEC_PROMPT = """Ты — ассистент строительной компа
 def _openai_request(payload: dict, api_key: str) -> dict:
     data = json.dumps(payload, ensure_ascii=False).encode()
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.deepseek.com/v1/chat/completions",
         data=data,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
         method="POST"
@@ -74,13 +74,13 @@ def _parse_items(content: str) -> list:
     return []
 
 def call_openai_text(text: str, materials_context: str) -> list:
-    """Разбор текстовой спецификации через GPT-4o-mini"""
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    """Разбор текстовой спецификации через DeepSeek"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
         return []
     prompt = f"{SPEC_PROMPT}\n\nБаза материалов для сопоставления цен:\n{materials_context}\n\nТекст спецификации:\n{text[:12000]}"
     result = _openai_request({
-        "model": "gpt-4o-mini",
+        "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
         "max_tokens": 4000,
@@ -88,8 +88,8 @@ def call_openai_text(text: str, materials_context: str) -> list:
     return _parse_items(result["choices"][0]["message"]["content"].strip())
 
 def call_openai_vision(images_b64: list, materials_context: str) -> list:
-    """OCR сканированного PDF через GPT-4o Vision — передаём страницы как изображения"""
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    """OCR сканированного PDF через DeepSeek Vision — передаём страницы как изображения"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
         return []
 
@@ -98,7 +98,7 @@ def call_openai_vision(images_b64: list, materials_context: str) -> list:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "high"}})
 
     result = _openai_request({
-        "model": "gpt-4o",
+        "model": "deepseek-chat",
         "messages": [{"role": "user", "content": content}],
         "temperature": 0.1,
         "max_tokens": 4000,
@@ -266,8 +266,8 @@ def handler(event: dict, context) -> dict:
         error_msg = ""
         mode = "text"
 
-        if not os.environ.get("OPENAI_API_KEY"):
-            error_msg = "OPENAI_API_KEY не настроен — добавьте ключ в секреты проекта"
+        if not os.environ.get("DEEPSEEK_API_KEY"):
+            error_msg = "DEEPSEEK_API_KEY не настроен — добавьте ключ в секреты проекта"
         elif extracted_text:
             # Текстовый PDF — быстрый GPT-4o-mini
             try:

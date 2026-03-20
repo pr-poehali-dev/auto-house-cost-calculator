@@ -328,7 +328,7 @@ def handler(event: dict, context) -> dict:
             for i, it in enumerate(top)
         )
 
-        api_key = os.environ.get("OPENAI_API_KEY","")
+        api_key = os.environ.get("DEEPSEEK_API_KEY","")
         if not api_key:
             # Fallback: текстовый поиск
             conn.close()
@@ -350,9 +350,9 @@ def handler(event: dict, context) -> dict:
 Где indices — номера из списка выше (1-based), максимум 30 позиций."""
 
         try:
-            data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
+            data = json.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],
                                "temperature":0.2,"max_tokens":800}, ensure_ascii=False).encode()
-            req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+            req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=data,
                 headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
             with urllib.request.urlopen(req, timeout=25) as r:
                 result = json.loads(r.read())

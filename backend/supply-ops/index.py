@@ -77,18 +77,18 @@ SYSTEM_PROMPTS = {
 }
 
 def get_openai_response(messages: list, role: str) -> str:
-    api_key = os.environ.get("OPENAI_API_KEY","")
+    api_key = os.environ.get("DEEPSEEK_API_KEY","")
     if not api_key:
-        return "AI-ассистент временно недоступен. Пожалуйста, добавьте OPENAI_API_KEY в настройках."
+        return "AI-ассистент временно недоступен. Пожалуйста, добавьте DEEPSEEK_API_KEY в настройках."
     system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
     payload = {
-        "model": "gpt-4o-mini",
+        "model": "deepseek-chat",
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": 1024,
         "temperature": 0.7,
     }
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.deepseek.com/v1/chat/completions",
         data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST"
@@ -100,8 +100,8 @@ def get_openai_response(messages: list, role: str) -> str:
     except urllib.error.HTTPError as e:
         err = e.read().decode()
         if "insufficient_quota" in err:
-            return "Баланс OpenAI исчерпан. Пополните счёт на platform.openai.com"
-        return f"Ошибка OpenAI: {e.code}"
+            return "Баланс DeepSeek исчерпан. Пополните счёт на platform.deepseek.com"
+        return f"Ошибка DeepSeek: {e.code}"
     except Exception as e:
         return f"Ошибка соединения с AI: {str(e)}"
 
@@ -283,9 +283,9 @@ def handler(event, context):
         if not prefs:
             return resp({"error": "preferences обязательны"}, 400)
 
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         if not api_key:
-            return resp({"error": "OPENAI_API_KEY не настроен"}, 500)
+            return resp({"error": "DEEPSEEK_API_KEY не настроен"}, 500)
 
         # Формируем промпт описания
         desc_prompt = f"""Создай профессиональное описание проекта частного дома на основе предпочтений заказчика.
@@ -309,11 +309,11 @@ def handler(event, context):
 {{"name": "...", "description": "...", "features": "особ1, особ2, особ3", "tag": "..."}}"""
 
         desc_messages = [{"role": "user", "content": desc_prompt}]
-        desc_payload = {"model": "gpt-4o-mini", "messages": desc_messages, "max_tokens": 512, "temperature": 0.8, "response_format": {"type": "json_object"}}
+        desc_payload = {"model": "deepseek-chat", "messages": desc_messages, "max_tokens": 512, "temperature": 0.8, "response_format": {"type": "json_object"}}
 
         try:
             req = urllib.request.Request(
-                "https://api.openai.com/v1/chat/completions",
+                "https://api.deepseek.com/v1/chat/completions",
                 data=json.dumps(desc_payload).encode(),
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 method="POST"
