@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { PROJECTS, formatPrice, formatNum, buildSmeta, type SmetaGroupData } from "./data";
+import ProjectCardImage from "./ProjectCardImage";
+import ProjectCard from "./ProjectCard";
+import SmetaGroup from "./SmetaGroup";
 
 const PROJECTS_API = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 
@@ -29,152 +31,6 @@ function mapApiProject(p: Record<string, unknown>) {
   };
 }
 
-function ProjectCardImage({ renders, tagColor, tag, compareList, id, toggleCompare }: {
-  renders: string[]; tagColor: string; tag: string;
-  compareList: number[]; id: number; toggleCompare: (id: number) => void;
-}) {
-  const [idx, setIdx] = useState(0);
-  const images = renders.length > 0 ? renders : [""];
-
-  return (
-    <div className="relative w-full h-44 overflow-hidden bg-black/20">
-      {images[idx] ? (
-        <img src={images[idx]} alt={tag}
-          className="w-full h-full object-cover transition-transform duration-500 hover:scale-105" loading="lazy" />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.03)" }}>
-          <Icon name="Image" size={32} style={{ color: "rgba(255,255,255,0.1)" }} />
-        </div>
-      )}
-      <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 45%, rgba(10,13,20,0.9) 100%)" }} />
-
-      {/* Тег */}
-      <div className="absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold font-display"
-        style={{ background: `${tagColor}ee`, color: "#0A0D14", backdropFilter: "blur(4px)" }}>
-        {tag}
-      </div>
-
-      {/* Кнопка сравнить */}
-      <button onClick={e => { e.stopPropagation(); toggleCompare(id); }}
-        className="absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-110"
-        style={{
-          background: compareList.includes(id) ? "var(--neon-cyan)" : "rgba(10,13,20,0.55)",
-          color: compareList.includes(id) ? "#000" : "rgba(255,255,255,0.75)",
-          backdropFilter: "blur(6px)",
-          border: compareList.includes(id) ? "none" : "1px solid rgba(255,255,255,0.15)",
-        }}>
-        <Icon name="GitCompare" size={13} />
-      </button>
-
-      {/* Стрелки навигации — только если рендеров > 1 */}
-      {images.length > 1 && (
-        <>
-          <button onClick={e => { e.stopPropagation(); setIdx(i => (i - 1 + images.length) % images.length); }}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-110"
-            style={{ background: "rgba(0,0,0,0.5)", color: "#fff", backdropFilter: "blur(4px)" }}>
-            <Icon name="ChevronLeft" size={13} />
-          </button>
-          <button onClick={e => { e.stopPropagation(); setIdx(i => (i + 1) % images.length); }}
-            className="absolute right-10 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-110"
-            style={{ background: "rgba(0,0,0,0.5)", color: "#fff", backdropFilter: "blur(4px)" }}>
-            <Icon name="ChevronRight" size={13} />
-          </button>
-          {/* Точки */}
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-            {images.map((_, i) => (
-              <button key={i} onClick={e => { e.stopPropagation(); setIdx(i); }}
-                className="rounded-full transition-all"
-                style={{ width: i === idx ? 16 : 6, height: 6, background: i === idx ? tagColor : "rgba(255,255,255,0.4)" }} />
-            ))}
-          </div>
-          {/* Счётчик */}
-          <div className="absolute bottom-2 right-10 text-xs px-1.5 py-0.5 rounded"
-            style={{ background: "rgba(0,0,0,0.5)", color: "rgba(255,255,255,0.7)" }}>
-            {idx + 1}/{images.length}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── SmetaGroup ───────────────────────────────────────────────────────────────
-
-const CATEGORY_COLORS: Record<string, string> = {
-  "Земляные работы": "#A855F7",
-  "Фундамент": "#00D4FF",
-  "Стены и перекрытия": "#FF6B1A",
-  "Кровля": "#FBBF24",
-  "Окна и двери": "#00FF88",
-  "Утепление и фасад": "#EC4899",
-  "Черновые полы": "#6366F1",
-  "Чистовые полы": "#14B8A6",
-  "Отделка стен и потолков": "#F97316",
-  "Электрика": "#EAB308",
-  "Сантехника": "#3B82F6",
-};
-
-function SmetaGroup({ group, index }: { group: SmetaGroupData; index: number }) {
-  const [open, setOpen] = useState(index < 2);
-  const color = CATEGORY_COLORS[group.category] || "var(--neon-orange)";
-
-  return (
-    <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)", animation: `fadeInUp 0.4s ease-out ${index * 0.04}s both` }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between p-4 sm:p-5 transition-all hover:bg-white/5"
-        style={{ background: "rgba(255,255,255,0.03)" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-          <span className="font-display font-semibold text-sm sm:text-base text-white tracking-wide">{group.category}</span>
-          <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}>
-            {group.items.length} поз.
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="font-display font-bold text-base sm:text-lg" style={{ color }}>
-            {formatNum(group.groupTotal)} ₽
-          </span>
-          <Icon name={open ? "ChevronUp" : "ChevronDown"} size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
-        </div>
-      </button>
-
-      {open && (
-        <div className="overflow-x-auto animate-fade-in">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ background: "rgba(255,255,255,0.02)" }}>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Наименование</th>
-                <th className="text-center px-3 py-2.5 text-xs font-semibold w-16" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Ед.</th>
-                <th className="text-right px-3 py-2.5 text-xs font-semibold w-20" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Кол-во</th>
-                <th className="text-right px-3 py-2.5 text-xs font-semibold w-28" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Цена/ед., ₽</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold w-32" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Сумма, ₽</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.items.map((item, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
-                  <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.8)" }}>{item.name}</td>
-                  <td className="px-3 py-2.5 text-center text-xs" style={{ color: "rgba(255,255,255,0.45)" }}>{item.unit}</td>
-                  <td className="px-3 py-2.5 text-right" style={{ color: "rgba(255,255,255,0.7)" }}>{item.totalQty}</td>
-                  <td className="px-3 py-2.5 text-right" style={{ color: "rgba(255,255,255,0.5)" }}>{formatNum(item.pricePerUnit)}</td>
-                  <td className="px-4 py-2.5 text-right font-semibold" style={{ color }}>{formatNum(item.totalPrice)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: `${color}11`, borderTop: `1px solid ${color}33` }}>
-                <td colSpan={3} className="px-4 py-3 text-sm font-semibold" style={{ color: "rgba(255,255,255,0.5)" }}>Итого по разделу</td>
-                <td colSpan={2} className="px-4 py-3 text-right font-display font-bold text-base" style={{ color }}>{formatNum(group.groupTotal)} ₽</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── ProjectsTab ──────────────────────────────────────────────────────────────
 
 interface ProjectsTabProps {
@@ -186,7 +42,6 @@ interface ProjectsTabProps {
 }
 
 export function ProjectsTab({ selectedProject, setSelectedProject, compareList, toggleCompare }: ProjectsTabProps) {
-  const navigate = useNavigate();
   const [projects, setProjects] = useState(PROJECTS);
   const [loading, setLoading] = useState(true);
 
@@ -221,91 +76,15 @@ export function ProjectsTab({ selectedProject, setSelectedProject, compareList, 
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {projects.map((p, i) => (
-          <div key={p.id}
-            className="rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-[1.02]"
-            style={{
-              background: "var(--card-bg)",
-              border: selectedProject === p.id ? `1px solid ${p.tagColor}` : "1px solid var(--card-border)",
-              boxShadow: selectedProject === p.id ? `0 0 30px ${p.tagColor}44` : "none",
-              animation: `fadeInUp 0.5s ease-out ${i * 0.07}s both`,
-            }}
-            onClick={() => setSelectedProject(selectedProject === p.id ? null : p.id)}>
-            {/* Шапка с рендерами */}
-            <ProjectCardImage
-              renders={"renders" in p ? (p as { renders: string[] }).renders : [p.image].filter(Boolean)}
-              tagColor={p.tagColor}
-              tag={p.tag}
-              compareList={compareList}
-              id={p.id}
-              toggleCompare={toggleCompare}
-            />
-
-            <div className="px-5 py-4">
-              <h3 className="font-display font-bold text-xl text-white">{p.name}</h3>
-              <p className="text-xs mt-1 mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>{p.desc}</p>
-
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {[
-                  { icon: "Maximize2", val: `${p.area} м²`, label: "Площадь" },
-                  { icon: "Layers", val: `${p.floors} эт.`, label: "Этажей" },
-                  { icon: "BedDouble", val: `${p.rooms} комн.`, label: "Комнат" },
-                ].map((s, j) => (
-                  <div key={j} className="rounded-xl p-2 text-center"
-                    style={{ background: "rgba(255,255,255,0.04)" }}>
-                    <Icon name={s.icon} size={12} style={{ color: p.tagColor, margin: "0 auto 3px" }} />
-                    <div className="font-bold text-xs text-white">{s.val}</div>
-                    <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>{s.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-1.5 mb-4">
-                {p.features.map((f, j) => (
-                  <div key={j} className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
-                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: p.tagColor }} />
-                    {f}
-                  </div>
-                ))}
-              </div>
-
-              <div className="pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Стоимость от</div>
-                    <div className="font-display font-bold text-xl" style={{ color: p.tagColor }}>
-                      {formatPrice(p.price)}
-                    </div>
-                  </div>
-                  <button className="px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-                    style={{ background: `${p.tagColor}22`, color: p.tagColor, border: `1px solid ${p.tagColor}44` }}>
-                    Подробнее
-                  </button>
-                </div>
-                <button
-                  onClick={e => { e.stopPropagation(); navigate(`/supplier?rfq=1&project=${encodeURIComponent(p.name)}&area=${p.area}&floors=${p.floors}`); }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02]"
-                  style={{ background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(168,85,247,0.1))", color: "#A855F7", border: "1px solid rgba(168,85,247,0.35)", boxShadow: "0 0 15px rgba(168,85,247,0.1)" }}>
-                  <Icon name="Truck" size={13} />
-                  Запросить КП у поставщиков
-                </button>
-              </div>
-
-              {selectedProject === p.id && (
-                <div className="mt-4 rounded-xl p-4 animate-scale-in"
-                  style={{ background: `${p.tagColor}11`, border: `1px solid ${p.tagColor}33` }}>
-                  <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>
-                    Цена за м²
-                  </div>
-                  <div className="font-display text-lg font-bold" style={{ color: p.tagColor }}>
-                    {formatPrice(Math.round(p.price / p.area))} / м²
-                  </div>
-                  <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.35)" }}>
-                    {p.type} · {p.area} м² · {p.floors} этаж(а)
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <ProjectCard
+            key={p.id}
+            project={p}
+            index={i}
+            selectedProject={selectedProject}
+            setSelectedProject={setSelectedProject}
+            compareList={compareList}
+            toggleCompare={toggleCompare}
+          />
         ))}
       </div>
     </div>
@@ -507,3 +286,7 @@ export function SmetaTab({ area, floors, finishing, houseTypeLabel, finishingLab
     </div>
   );
 }
+
+// re-export unused imports to avoid breaking any consumers that import from this file
+export { ProjectCardImage };
+export type { SmetaGroupData };
