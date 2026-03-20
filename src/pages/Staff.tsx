@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
 import ProjectPanel from "@/components/ProjectEditor";
+import ArchitectCabinetNew from "./staff/ArchitectCabinet";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -1255,7 +1256,7 @@ export default function Staff() {
 
   const renderCabinet = () => {
     switch (user.role_code) {
-      case "architect": return <ArchitectCabinet user={user} token={token} />;
+      case "architect": return <ArchitectCabinetNew user={user} token={token} />;
       case "constructor": return <ConstructorCabinet user={user} token={token} />;
       case "supply": return <SupplyCabinet user={user} token={token} />;
       default: return <ReadonlyCabinet user={user} token={token} />;

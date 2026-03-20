@@ -301,5 +301,27 @@ def handler(event: dict, context) -> dict:
         rows = cur.fetchall(); cur.close(); conn.close()
         return resp({"history":[{"id":r[0],"field":r[1],"old":r[2],"new":r[3],"at":str(r[4]),"by":r[5],"item":r[6]} for r in rows]})
 
+    # ── Технологические карты ─────────────────────────────────────────────────
+
+    if action == "tech_cards":
+        cur = conn.cursor()
+        cat = qs.get("category", body.get("category", ""))
+        if cat:
+            cur.execute(f"SELECT id,title,category,description,content,created_at FROM {S}.tech_cards WHERE is_active=TRUE AND category=%s ORDER BY title", (cat,))
+        else:
+            cur.execute(f"SELECT id,title,category,description,content,created_at FROM {S}.tech_cards WHERE is_active=TRUE ORDER BY category,title")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return resp({"tech_cards":[{"id":r[0],"title":r[1],"category":r[2],"description":r[3],"content":r[4],"created_at":str(r[5])} for r in rows]})
+
+    if action == "tech_card_attach":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        pid = body.get("project_id")
+        tc_id = body.get("tech_card_id")
+        if not pid or not tc_id: conn.close(); return resp({"error":"project_id и tech_card_id обязательны"}, 400)
+        # Сохраняем как файл-ссылку в change_log
+        log(conn, staff["id"], "house_projects", pid, "attach_tech_card", str(tc_id))
+        conn.commit(); conn.close()
+        return resp({"ok":True})
+
     conn.close()
     return resp({"error":"Not found"}, 404)
