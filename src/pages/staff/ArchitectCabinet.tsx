@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
+const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
 const CHUNK_SIZE = 3 * 1024 * 1024; // 3МБ на чанк
 
 async function uploadFileChunked(
@@ -83,6 +84,16 @@ interface Project {
   rooms: number; price: number; tag: string; tag_color: string;
   description: string; features: string; is_active: boolean;
   created_at: string; files: ProjectFile[]; specs: Spec[];
+  roof_type: string; foundation_type: string; wall_type: string;
+}
+
+interface MatchedTTK {
+  id: number; title: string; category: string; work_type: string;
+  description: string; tags: string[];
+  materials: { name: string; unit: string; qty_per_unit: number; note: string }[];
+  resources: { name: string; type: string; qty: number; unit: string }[];
+  storage_conditions: string; acceptance_conditions: string;
+  content: { step: number; name: string; desc: string; duration: string }[];
 }
 
 interface ProjectFile {
@@ -602,6 +613,211 @@ function SpecEditor({ spec, token, onUpdate }: { spec: Spec; token: string; onUp
   );
 }
 
+// ─── TechTab — автоподбор ТТК по параметрам проекта ──────────────────────────
+
+const CATEGORY_ICON: Record<string, string> = {
+  "Кровля": "Home", "Фундамент": "Layers", "Стены": "Square", "Инженерия": "Wrench",
+  "Электрика": "Zap", "Полы": "LayoutGrid", "Отделка": "Palette", "Окна и двери": "RectangleHorizontal",
+};
+
+function TechTab({ proj, token, onOpenLibrary }: { proj: Project; token: string; onOpenLibrary: () => void }) {
+  const [cards, setCards] = useState<MatchedTTK[]>([]);
+  const [reply, setReply] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expandedSection, setExpandedSection] = useState<"materials" | "resources" | "steps" | "conditions" | null>(null);
+  const hasParams = !!(proj.roof_type || proj.foundation_type || proj.wall_type);
+
+  const match = useCallback(async () => {
+    setLoading(true); setCards([]); setReply("");
+    const r = await apiFetch(`${TTK_URL}?action=match_project`, {
+      method: "POST",
+      body: JSON.stringify({
+        params: {
+          roof_type: proj.roof_type, wall_type: proj.wall_type,
+          foundation_type: proj.foundation_type, area: proj.area,
+          house_type: proj.type, floors: proj.floors,
+        }
+      }),
+    }, token);
+    setCards(r.cards || []);
+    setReply(r.reply || "");
+    setLoading(false);
+  }, [proj, token]);
+
+  useEffect(() => { if (hasParams) match(); }, [match, hasParams]);
+
+  if (!hasParams) {
+    return (
+      <div className="rounded-2xl p-8 text-center" style={{ background: "var(--card-bg)", border: "1px solid rgba(168,85,247,0.2)" }}>
+        <Icon name="BookOpen" size={40} style={{ color: "rgba(168,85,247,0.4)", margin: "0 auto 12px" }} />
+        <div className="font-semibold text-white mb-2">Укажите параметры строительства</div>
+        <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>
+          Добавьте тип кровли, фундамента и стен в настройках проекта — AI автоматически подберёт нужные технологические карты
+        </p>
+        <button onClick={onOpenLibrary}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+          style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)" }}>
+          <Icon name="Library" size={14} /> Открыть библиотеку вручную
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Параметры проекта */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {proj.roof_type && <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.2)" }}><Icon name="Home" size={11} /> {proj.roof_type}</span>}
+        {proj.foundation_type && <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: "rgba(59,130,246,0.12)", color: "#3b82f6", border: "1px solid rgba(59,130,246,0.2)" }}><Icon name="Layers" size={11} /> {proj.foundation_type}</span>}
+        {proj.wall_type && <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: "rgba(34,197,94,0.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}><Icon name="Square" size={11} /> {proj.wall_type}</span>}
+        <button onClick={match} disabled={loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ml-auto transition-all"
+          style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)" }}>
+          <Icon name={loading ? "Loader" : "RefreshCw"} size={11} />
+          {loading ? "Подбираю..." : "Обновить"}
+        </button>
+      </div>
+
+      {/* AI-комментарий */}
+      {reply && (
+        <div className="rounded-xl p-3 mb-4 flex items-start gap-2" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.15)" }}>
+          <Icon name="Sparkles" size={14} style={{ color: "#A855F7", marginTop: 2, flexShrink: 0 }} />
+          <p className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>{reply}</p>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="w-8 h-8 border-2 border-white/10 rounded-full animate-spin" style={{ borderTopColor: "#A855F7" }} />
+        </div>
+      )}
+
+      {!loading && cards.length === 0 && (
+        <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <Icon name="SearchX" size={32} style={{ margin: "0 auto 8px" }} />
+          <div className="text-sm">Подходящих карт не найдено. <button onClick={onOpenLibrary} className="underline" style={{ color: "#A855F7" }}>Открыть библиотеку</button></div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {cards.map(card => (
+          <div key={card.id} className="rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            {/* Header */}
+            <button className="w-full text-left px-5 py-4 flex items-center gap-3" onClick={() => setExpanded(expanded === card.id ? null : card.id)}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(168,85,247,0.15)" }}>
+                <Icon name={CATEGORY_ICON[card.category] || "FileText"} size={16} style={{ color: "#A855F7" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm text-white">{card.title}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}>{card.category}</span>
+                </div>
+                <div className="text-xs mt-0.5 truncate" style={{ color: "rgba(255,255,255,0.4)" }}>{card.description}</div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                {card.materials.length > 0 && <span className="flex items-center gap-1"><Icon name="Package" size={11} />{card.materials.length}</span>}
+                {card.content.length > 0 && <span className="flex items-center gap-1"><Icon name="ListOrdered" size={11} />{card.content.length}</span>}
+                <Icon name={expanded === card.id ? "ChevronUp" : "ChevronDown"} size={14} />
+              </div>
+            </button>
+
+            {/* Detail */}
+            {expanded === card.id && (
+              <div className="border-t px-5 pb-5 pt-4 space-y-3" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+                {/* Sub-tabs */}
+                <div className="flex gap-1 p-0.5 rounded-lg w-fit" style={{ background: "rgba(255,255,255,0.04)" }}>
+                  {(["materials","resources","steps","conditions"] as const).map(s => (
+                    <button key={s} onClick={() => setExpandedSection(expandedSection === s ? null : s)}
+                      className="px-3 py-1 rounded-md text-xs font-medium transition-all"
+                      style={{ background: expandedSection === s ? "rgba(168,85,247,0.3)" : "transparent", color: expandedSection === s ? "#A855F7" : "rgba(255,255,255,0.4)" }}>
+                      {s === "materials" ? `Материалы (${card.materials.length})` : s === "resources" ? `Ресурсы (${card.resources.length})` : s === "steps" ? `Этапы (${card.content.length})` : "Приёмка"}
+                    </button>
+                  ))}
+                </div>
+
+                {expandedSection === "materials" && card.materials.length > 0 && (
+                  <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <table className="w-full text-xs">
+                      <thead><tr style={{ background: "rgba(255,255,255,0.04)" }}>
+                        {["Материал","Ед.","Норма расхода","Примечание"].map(h => <th key={h} className="text-left px-3 py-2" style={{ color: "rgba(255,255,255,0.4)" }}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>{card.materials.map((m, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                          <td className="px-3 py-2 text-white font-medium">{m.name}</td>
+                          <td className="px-3 py-2" style={{ color: "rgba(255,255,255,0.5)" }}>{m.unit}</td>
+                          <td className="px-3 py-2" style={{ color: "rgba(255,255,255,0.5)" }}>{m.qty_per_unit > 0 ? m.qty_per_unit : "—"}</td>
+                          <td className="px-3 py-2" style={{ color: "rgba(255,255,255,0.35)" }}>{m.note}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+
+                {expandedSection === "resources" && card.resources.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {card.resources.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: "rgba(255,255,255,0.04)" }}>
+                        <div>
+                          <div className="text-xs text-white">{r.name}</div>
+                          <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>{r.type}</div>
+                        </div>
+                        <div className="text-xs font-semibold" style={{ color: "#A855F7" }}>{r.qty} {r.unit}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {expandedSection === "steps" && card.content.length > 0 && (
+                  <div className="space-y-2">
+                    {card.content.map((step, i) => (
+                      <div key={i} className="flex gap-3 rounded-lg p-3" style={{ background: "rgba(255,255,255,0.04)" }}>
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold" style={{ background: "rgba(168,85,247,0.2)", color: "#A855F7" }}>{step.step}</div>
+                        <div>
+                          <div className="text-sm font-semibold text-white">{step.name}</div>
+                          <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.5)" }}>{step.desc}</div>
+                          {step.duration && <div className="text-xs mt-1" style={{ color: "#FBBF24" }}>{step.duration}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {expandedSection === "conditions" && (
+                  <div className="space-y-3">
+                    {card.storage_conditions && (
+                      <div className="rounded-xl p-3" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
+                        <div className="text-xs font-semibold mb-1" style={{ color: "#3b82f6" }}>Условия хранения</div>
+                        <p className="text-sm whitespace-pre-line" style={{ color: "rgba(255,255,255,0.7)" }}>{card.storage_conditions}</p>
+                      </div>
+                    )}
+                    {card.acceptance_conditions && (
+                      <div className="rounded-xl p-3" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.15)" }}>
+                        <div className="text-xs font-semibold mb-1" style={{ color: "#22c55e" }}>Требования к приёмке</div>
+                        <p className="text-sm whitespace-pre-line" style={{ color: "rgba(255,255,255,0.7)" }}>{card.acceptance_conditions}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {cards.length > 0 && (
+        <div className="mt-4 text-center">
+          <button onClick={onOpenLibrary}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
+            style={{ color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <Icon name="Library" size={14} /> Открыть полную библиотеку
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
@@ -865,24 +1081,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
 
       {/* ── Тех. карты ── */}
       {tab === "tech" && (
-        <div className="rounded-2xl p-5" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>Технологические карты</div>
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>Выберите карты из библиотеки шаблонов</p>
-            </div>
-            <button onClick={() => setShowTechCards(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-              style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)" }}>
-              <Icon name="BookOpen" size={14} />
-              Открыть библиотеку
-            </button>
-          </div>
-          <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.25)" }}>
-            <div className="text-4xl mb-3">📖</div>
-            Нажмите «Открыть библиотеку» чтобы выбрать<br />технологические карты для проекта
-          </div>
-        </div>
+        <TechTab proj={proj} token={token} onOpenLibrary={() => setShowTechCards(true)} />
       )}
 
       {showTechCards && (
@@ -903,6 +1102,7 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
   const [form, setForm] = useState({
     name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4,
     price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true,
+    roof_type: "", foundation_type: "", wall_type: "",
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -917,13 +1117,13 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
   useEffect(() => { load(); }, [load]);
 
   const openNew = () => {
-    setForm({ name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4, price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true });
+    setForm({ name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4, price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true, roof_type: "", foundation_type: "", wall_type: "" });
     setEditingId(null); setShowForm(true); setMsg("");
   };
 
   const openEdit = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
-    setForm({ name: p.name, type: p.type, area: p.area, floors: p.floors, rooms: p.rooms, price: p.price, tag: p.tag, tag_color: p.tag_color, description: p.description, features: p.features, is_active: p.is_active });
+    setForm({ name: p.name, type: p.type, area: p.area, floors: p.floors, rooms: p.rooms, price: p.price, tag: p.tag, tag_color: p.tag_color, description: p.description, features: p.features, is_active: p.is_active, roof_type: p.roof_type || "", foundation_type: p.foundation_type || "", wall_type: p.wall_type || "" });
     setEditingId(p.id); setShowForm(true); setMsg("");
   };
 
@@ -1014,6 +1214,30 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                     style={{ background: c, outline: form.tag_color === c ? `3px solid #fff` : "none", outlineOffset: 2 }} />
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип кровли</label>
+              <select value={form.roof_type} onChange={e => setForm(p => ({ ...p, roof_type: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["Металлочерепица","Профнастил","Мягкая черепица","Керамическая черепица","Фальцевая кровля","Ондулин","Плоская кровля"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип фундамента</label>
+              <select value={form.foundation_type} onChange={e => setForm(p => ({ ...p, foundation_type: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["Ленточный монолитный","Плитный (УШП)","Свайно-ростверковый","Столбчатый","Свайный (винтовые сваи)"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип стен</label>
+              <select value={form.wall_type} onChange={e => setForm(p => ({ ...p, wall_type: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["Кирпич","Газобетон","Каркасные стены","СИП-панели","Монолитный бетон","Брус","Бревно"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
               <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Описание</label>

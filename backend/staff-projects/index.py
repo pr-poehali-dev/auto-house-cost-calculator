@@ -44,7 +44,8 @@ def project_row(r):
     return {"id":r[0],"name":r[1],"type":r[2],"area":r[3],"floors":r[4],"rooms":r[5],"price":r[6],
             "tag":r[7],"tag_color":r[8],"description":r[9],"features":r[10],
             "is_active":r[11],"created_by":r[12],"updated_by":r[13],
-            "created_at":str(r[14]),"updated_at":str(r[15])}
+            "created_at":str(r[14]),"updated_at":str(r[15]),
+            "roof_type":r[16] or "","foundation_type":r[17] or "","wall_type":r[18] or ""}
 
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
@@ -68,7 +69,8 @@ def handler(event: dict, context) -> dict:
         cur = conn.cursor()
         cur.execute(f"""
             SELECT p.id,p.name,p.type,p.area,p.floors,p.rooms,p.price,p.tag,p.tag_color,
-                   p.description,p.features,p.is_active,p.created_by,p.updated_by,p.created_at,p.updated_at
+                   p.description,p.features,p.is_active,p.created_by,p.updated_by,p.created_at,p.updated_at,
+                   p.roof_type,p.foundation_type,p.wall_type
             FROM {S}.house_projects p WHERE p.is_active=TRUE ORDER BY p.created_at DESC
         """)
         projects = [project_row(r) for r in cur.fetchall()]
@@ -103,7 +105,7 @@ def handler(event: dict, context) -> dict:
 
     if action == "list":
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at FROM {S}.house_projects ORDER BY created_at DESC")
+        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type FROM {S}.house_projects ORDER BY created_at DESC")
         projects = [project_row(r) for r in cur.fetchall()]
         for p in projects:
             cur.execute(f"SELECT id,file_type,file_url,file_name,sort_order FROM {S}.project_files WHERE project_id=%s ORDER BY file_type,sort_order", (p["id"],))
@@ -115,7 +117,7 @@ def handler(event: dict, context) -> dict:
         pid = body.get("project_id") or qs.get("project_id")
         if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at FROM {S}.house_projects WHERE id=%s", (pid,))
+        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type FROM {S}.house_projects WHERE id=%s", (pid,))
         r = cur.fetchone()
         if not r: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
         p = project_row(r)
@@ -133,10 +135,11 @@ def handler(event: dict, context) -> dict:
             if body.get(f) is None: conn.close(); return resp({"error":f"Поле {f} обязательно"}, 400)
         cur = conn.cursor()
         cur.execute(f"""INSERT INTO {S}.house_projects
-            (name,type,area,floors,rooms,price,tag,tag_color,description,features,created_by,updated_by)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (name,type,area,floors,rooms,price,tag,tag_color,description,features,roof_type,foundation_type,wall_type,created_by,updated_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (body["name"],body["type"],body["area"],body["floors"],body["rooms"],body["price"],
              body.get("tag",""),body.get("tag_color","#FF6B1A"),body.get("description",""),body.get("features",""),
+             body.get("roof_type",""),body.get("foundation_type",""),body.get("wall_type",""),
              staff["id"],staff["id"]))
         new_id = cur.fetchone()[0]
         log(conn, staff["id"], "house_projects", new_id, "create", body["name"])
@@ -147,7 +150,7 @@ def handler(event: dict, context) -> dict:
         if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)
         pid = body.get("project_id")
         if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
-        editable = ["name","type","area","floors","rooms","price","tag","tag_color","description","features","is_active"]
+        editable = ["name","type","area","floors","rooms","price","tag","tag_color","description","features","is_active","roof_type","foundation_type","wall_type"]
         fields, vals = [], []
         for k in editable:
             if k in body: fields.append(f"{k}=%s"); vals.append(body[k])
