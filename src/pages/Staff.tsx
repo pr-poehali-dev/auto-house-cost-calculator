@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
 import ProjectPanel from "@/components/ProjectEditor";
 import ArchitectCabinetNew from "./staff/ArchitectCabinet";
+import MaterialsDB from "./staff/MaterialsDB";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -459,6 +460,10 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
 
 // ─── Constructor cabinet ───────────────────────────────────────────────────────
 function ConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
+  return <MaterialsDB user={user} token={token} />;
+}
+
+function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [projects, setProjects] = useState<HouseProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1029,58 +1034,7 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
       )}
 
       {/* ── Prices tab ── */}
-      {tab === "prices" && (
-        <div>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {matCategories.map(c => (
-              <button key={c} onClick={() => setFilterCat(c)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                style={{ background: filterCat===c?"#FBBF24":"rgba(255,255,255,0.06)", color: filterCat===c?"#000":"rgba(255,255,255,0.5)", border: filterCat===c?"none":"1px solid rgba(255,255,255,0.08)" }}>
-                {c}
-              </button>
-            ))}
-          </div>
-          {loading ? <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div> : (
-            <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                    {["Наименование","Ед.","Текущая цена","Новая цена",""].map((h,i) => (
-                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid var(--card-border)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMats.map((m, i) => (
-                    <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i%2?"rgba(255,255,255,0.015)":"transparent" }}>
-                      <td className="px-4 py-3"><div className="text-white">{m.name}</div><div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>{m.category}</div></td>
-                      <td className="px-4 py-3 text-xs text-center" style={{ color: "rgba(255,255,255,0.5)" }}>{m.unit}</td>
-                      <td className="px-4 py-3 font-display font-bold" style={{ color: "#FBBF24" }}>{m.price_per_unit.toLocaleString("ru-RU")} ₽</td>
-                      <td className="px-4 py-3">
-                        {editingPriceId === m.id
-                          ? <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} autoFocus
-                              className="w-28 px-2 py-1.5 rounded-lg text-sm text-white outline-none"
-                              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid #FBBF24" }} />
-                          : <button onClick={() => { setEditingPriceId(m.id); setNewPrice(String(m.price_per_unit)); }}
-                              className="text-xs px-3 py-1.5 rounded-lg hover:bg-white/10"
-                              style={{ color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>Изменить</button>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {editingPriceId === m.id && (
-                          <div className="flex gap-1.5">
-                            <button onClick={() => savePrice(m.id)} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60" style={{ background: "#FBBF24", color: "#000" }}>✓</button>
-                            <button onClick={() => setEditingPriceId(null)} className="px-3 py-1.5 rounded-lg text-xs" style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.5)" }}>✕</button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+      {tab === "prices" && <MaterialsDB user={user} token={token} />}
 
       {/* ── Invoices tab ── */}
       {tab === "invoices" && (

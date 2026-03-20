@@ -1,7 +1,13 @@
 {
   "tests": [
     {
-      "name": "Get materials without token",
+      "name": "Public materials list",
+      "method": "GET",
+      "path": "/?action=public",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Get materials without token returns 401",
       "method": "GET",
       "path": "/",
       "expectedStatus": 401

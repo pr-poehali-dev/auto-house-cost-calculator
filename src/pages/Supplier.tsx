@@ -417,13 +417,149 @@ function MyProposals({ token }: { token: string }) {
   );
 }
 
+// ─── SupplierPriceOffer ────────────────────────────────────────────────────────
+const MAT_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
+
+interface MatItem { id: number; category: string; name: string; unit: string; price_per_unit: number; best_price: number | null; }
+
+function SupplierPriceOffer({ token, user }: { token: string; user: SupplierUser }) {
+  const [items, setItems] = useState<MatItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterCat, setFilterCat] = useState("Все");
+  const [search, setSearch] = useState("");
+  const [prices, setPrices] = useState<Record<number, string>>({});
+  const [location, setLocation] = useState(user.region || "");
+  const [saving, setSaving] = useState<number | null>(null);
+  const [saved, setSaved] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    apiFetch(MAT_URL + "?action=public", {}).then(r => {
+      setItems(r.items || []); setLoading(false);
+    });
+  }, []);
+
+  const cats = ["Все", ...Array.from(new Set(items.map(i => i.category)))];
+  const filtered = items.filter(i => {
+    if (filterCat !== "Все" && i.category !== filterCat) return false;
+    if (search && !i.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const submitPrice = async (materialId: number) => {
+    const price = parseFloat(prices[materialId] || "0");
+    if (!price || price <= 0) return;
+    setSaving(materialId);
+    await apiFetch(MAT_URL + "?action=offer_price", {
+      method: "POST",
+      body: JSON.stringify({ material_id: materialId, price, location }),
+    }, token);
+    setSaving(null);
+    setSaved(prev => new Set([...prev, materialId]));
+  };
+
+  return (
+    <div>
+      <div className="mb-6">
+        <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-cyan)" }}>Ценообразование</div>
+        <h2 className="font-display text-2xl font-bold text-white">Предложить свои цены</h2>
+        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+          Укажите цены на материалы — лучшие предложения автоматически обновят базу
+        </p>
+      </div>
+
+      <div className="rounded-2xl p-4 mb-5 flex flex-wrap gap-3 items-center"
+        style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.2)" }}>
+        <div>
+          <div className="text-xs mb-1 font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.35)" }}>Регион поставки</div>
+          <input value={location} onChange={e => setLocation(e.target.value)}
+            placeholder="Москва и МО"
+            className="px-3 py-2 rounded-xl text-sm text-white outline-none"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", minWidth: 220 }} />
+        </div>
+        <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+          Ваши предложения будут видны только в привязке к выбранному региону
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl flex-1 min-w-48" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 14 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск материала..." className="bg-transparent outline-none text-sm flex-1" style={{ color: "rgba(255,255,255,0.8)" }} />
+        </div>
+        <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
+          className="px-3 py-2 rounded-xl text-sm text-white outline-none"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          {cats.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка базы материалов...</div>
+      ) : (
+        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                {["Категория","Наименование","Ед.","Текущая лучшая цена","Ваша цена, ₽",""].map((h, i) => (
+                  <th key={i} className="px-4 py-3 text-left text-xs font-semibold" style={{ color: "rgba(255,255,255,0.35)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item, i) => (
+                <tr key={item.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i%2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                  <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{item.category}</td>
+                  <td className="px-4 py-3 font-medium text-white">{item.name}</td>
+                  <td className="px-4 py-3 text-xs text-center" style={{ color: "rgba(255,255,255,0.5)" }}>{item.unit}</td>
+                  <td className="px-4 py-3">
+                    {item.best_price
+                      ? <span className="font-display font-bold text-sm" style={{ color: "var(--neon-green)" }}>{formatMoney(item.best_price)}</span>
+                      : <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="number"
+                      value={prices[item.id] || ""}
+                      onChange={e => setPrices(p => ({ ...p, [item.id]: e.target.value }))}
+                      placeholder="Введите цену"
+                      className="w-32 px-3 py-2 rounded-xl text-sm text-white outline-none transition-all"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: `1px solid ${saved.has(item.id) ? "rgba(0,255,136,0.4)" : "rgba(255,255,255,0.1)"}`,
+                      }}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    {saved.has(item.id) ? (
+                      <span className="text-xs font-semibold" style={{ color: "var(--neon-green)" }}>✓ Отправлено</span>
+                    ) : (
+                      <button
+                        onClick={() => submitPrice(item.id)}
+                        disabled={!prices[item.id] || saving === item.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-40"
+                        style={{ background: "var(--neon-cyan)", color: "#000" }}>
+                        {saving === item.id ? "..." : "Отправить"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupplierPortal() {
   const [searchParams] = useSearchParams();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<SupplierUser | null>(null);
   const [checking, setChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rfqs" | "proposals">("rfqs");
+  const [activeTab, setActiveTab] = useState<"rfqs" | "proposals" | "prices">("rfqs");
 
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY);
@@ -476,8 +612,8 @@ export default function SupplierPortal() {
           </div>
           <div className="flex items-center gap-2">
             <nav className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.05)" }}>
-              {[{id:"rfqs",label:"Запросы КП",icon:"FileText"},{id:"proposals",label:"Мои КП",icon:"Send"}].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id as "rfqs"|"proposals")}
+              {[{id:"rfqs",label:"Запросы КП",icon:"FileText"},{id:"proposals",label:"Мои КП",icon:"Send"},{id:"prices",label:"Предложить цены",icon:"Tag"}].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id as "rfqs"|"proposals"|"prices")}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                   style={{ background: activeTab === tab.id ? "var(--neon-cyan)" : "transparent", color: activeTab === tab.id ? "#000" : "rgba(255,255,255,0.5)" }}>
                   <Icon name={tab.icon} size={13} /><span className="hidden sm:inline">{tab.label}</span>
@@ -492,7 +628,9 @@ export default function SupplierPortal() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        {activeTab === "rfqs" ? <RfqList token={token} /> : <MyProposals token={token} />}
+        {activeTab === "rfqs" && <RfqList token={token} />}
+        {activeTab === "proposals" && <MyProposals token={token} />}
+        {activeTab === "prices" && <SupplierPriceOffer token={token} user={user} />}
       </main>
 
       <ChatWidget role="supplier" userName={user.company_name} />

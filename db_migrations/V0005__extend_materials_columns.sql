@@ -1,0 +1,9 @@
+ALTER TABLE t_p78845984_auto_house_cost_calc.materials
+  ADD COLUMN IF NOT EXISTS item_type VARCHAR(16) NOT NULL DEFAULT 'material',
+  ADD COLUMN IF NOT EXISTS article VARCHAR(64) DEFAULT '',
+  ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS best_price NUMERIC(12,2) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS best_price_supplier_id INTEGER REFERENCES t_p78845984_auto_house_cost_calc.suppliers(id),
+  ADD COLUMN IF NOT EXISTS best_price_updated_at TIMESTAMPTZ DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES t_p78845984_auto_house_cost_calc.staff(id),
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
