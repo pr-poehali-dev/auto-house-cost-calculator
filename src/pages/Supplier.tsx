@@ -130,7 +130,15 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: SupplierUser) =>
             </>
           )}
           {error && mode === "register" && (
-            <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>
+            <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>
+              {error}
+              {error.toLowerCase().includes("email") && (
+                <button type="button" onClick={() => { setMode("login"); setError(""); }}
+                  className="ml-2 underline font-semibold whitespace-nowrap" style={{ color: "#ef4444" }}>
+                  Войти с этим email →
+                </button>
+              )}
+            </div>
           )}
           <div>
             <label className={label} style={labelStyle}>Email</label>
