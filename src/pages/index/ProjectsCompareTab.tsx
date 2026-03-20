@@ -1,7 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { PROJECTS, formatPrice, formatNum, buildSmeta, type SmetaGroupData } from "./data";
+
+const PROJECTS_API = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
+
+function mapApiProject(p: Record<string, unknown>) {
+  const files = (p.files as { file_type: string; file_url: string }[]) || [];
+  const render = files.find(f => f.file_type === "render")?.file_url || "";
+  const features = p.features ? String(p.features).split("\n").filter(Boolean) : [];
+  return {
+    id: p.id as number,
+    name: p.name as string,
+    type: p.type as string,
+    area: p.area as number,
+    floors: p.floors as number,
+    rooms: p.rooms as number,
+    price: p.price as number,
+    tag: (p.tag as string) || p.type as string,
+    tagColor: (p.tag_color as string) || "#FF6B1A",
+    desc: (p.description as string) || "",
+    features,
+    image: render,
+    files,
+  };
+}
 
 // ─── SmetaGroup ───────────────────────────────────────────────────────────────
 
@@ -92,6 +115,19 @@ interface ProjectsTabProps {
 
 export function ProjectsTab({ selectedProject, setSelectedProject, compareList, toggleCompare }: ProjectsTabProps) {
   const navigate = useNavigate();
+  const [projects, setProjects] = useState(PROJECTS);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${PROJECTS_API}?action=public_list`)
+      .then(r => r.json())
+      .then(r => {
+        if (r.projects?.length) setProjects(r.projects.map(mapApiProject));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <div className="animate-fade-in">
       <div className="mb-8">
@@ -104,8 +140,15 @@ export function ProjectsTab({ selectedProject, setSelectedProject, compareList, 
         </p>
       </div>
 
+      {loading && (
+        <div className="flex items-center justify-center py-16 gap-3" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.1)", borderTopColor: "var(--neon-orange)" }} />
+          Загрузка проектов...
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {PROJECTS.map((p, i) => (
+        {projects.map((p, i) => (
           <div key={p.id}
             className="rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-[1.02]"
             style={{
@@ -221,9 +264,10 @@ interface CompareTabProps {
   compareList: number[];
   toggleCompare: (id: number) => void;
   setActiveTab: (tab: string) => void;
+  projects?: typeof PROJECTS;
 }
 
-export function CompareTab({ compareList, toggleCompare, setActiveTab }: CompareTabProps) {
+export function CompareTab({ compareList, toggleCompare, setActiveTab, projects = PROJECTS }: CompareTabProps) {
   return (
     <div className="animate-fade-in">
       <div className="mb-8">
@@ -261,7 +305,7 @@ export function CompareTab({ compareList, toggleCompare, setActiveTab }: Compare
                     Параметр
                   </th>
                   {compareList.map(id => {
-                    const p = PROJECTS.find(pr => pr.id === id)!;
+                    const p = projects.find(pr => pr.id === id)!;
                     return (
                       <th key={id} className="p-5 text-center"
                         style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid var(--card-border)" }}>
@@ -274,12 +318,12 @@ export function CompareTab({ compareList, toggleCompare, setActiveTab }: Compare
               </thead>
               <tbody>
                 {[
-                  { label: "Тип строения", render: (p: typeof PROJECTS[0]) => p.type },
-                  { label: "Площадь", render: (p: typeof PROJECTS[0]) => `${p.area} м²` },
-                  { label: "Этажей", render: (p: typeof PROJECTS[0]) => String(p.floors) },
-                  { label: "Комнат", render: (p: typeof PROJECTS[0]) => String(p.rooms) },
-                  { label: "Стоимость от", render: (p: typeof PROJECTS[0]) => formatPrice(p.price), highlight: true },
-                  { label: "Цена / м²", render: (p: typeof PROJECTS[0]) => formatPrice(Math.round(p.price / p.area)) },
+                  { label: "Тип строения", render: (p: (typeof projects)[0]) => p.type },
+                  { label: "Площадь", render: (p: (typeof projects)[0]) => `${p.area} м²` },
+                  { label: "Этажей", render: (p: (typeof projects)[0]) => String(p.floors) },
+                  { label: "Комнат", render: (p: (typeof projects)[0]) => String(p.rooms) },
+                  { label: "Стоимость от", render: (p: (typeof projects)[0]) => formatPrice(p.price), highlight: true },
+                  { label: "Цена / м²", render: (p: (typeof projects)[0]) => formatPrice(Math.round(p.price / p.area)) },
                 ].map((row, i) => (
                   <tr key={i}>
                     <td className="p-5 text-sm"
@@ -291,7 +335,7 @@ export function CompareTab({ compareList, toggleCompare, setActiveTab }: Compare
                       {row.label}
                     </td>
                     {compareList.map(id => {
-                      const p = PROJECTS.find(pr => pr.id === id)!;
+                      const p = projects.find(pr => pr.id === id)!;
                       return (
                         <td key={id} className="p-5 text-center"
                           style={{
@@ -313,7 +357,7 @@ export function CompareTab({ compareList, toggleCompare, setActiveTab }: Compare
 
           <div className="mt-4 flex gap-2 flex-wrap">
             {compareList.map(id => {
-              const p = PROJECTS.find(pr => pr.id === id)!;
+              const p = projects.find(pr => pr.id === id)!;
               return (
                 <button key={id} onClick={() => toggleCompare(id)}
                   className="px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all hover:bg-white/10"

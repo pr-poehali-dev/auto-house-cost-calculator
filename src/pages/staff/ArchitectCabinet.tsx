@@ -847,12 +847,18 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
               style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)" }}>
               Отмена
             </button>
-            {editingId && (
-              <label className="flex items-center gap-2 ml-auto cursor-pointer">
-                <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
-                <span className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>Активен</span>
-              </label>
-            )}
+            <label className="flex items-center gap-2 ml-auto cursor-pointer select-none">
+              <div
+                onClick={() => setForm(p => ({ ...p, is_active: !p.is_active }))}
+                className="relative w-10 h-5 rounded-full transition-all flex-shrink-0"
+                style={{ background: form.is_active ? "var(--neon-green)" : "rgba(255,255,255,0.15)", cursor: "pointer" }}>
+                <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  style={{ left: form.is_active ? "calc(100% - 18px)" : "2px", boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }} />
+              </div>
+              <span className="text-sm font-medium" style={{ color: form.is_active ? "var(--neon-green)" : "rgba(255,255,255,0.4)" }}>
+                {form.is_active ? "Опубликован на сайте" : "Черновик (не виден)"}
+              </span>
+            </label>
           </div>
         </div>
       )}
