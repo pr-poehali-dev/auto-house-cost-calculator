@@ -470,6 +470,13 @@ export default function Index() {
                 </button>
               ))}
             </div>
+            <button onClick={() => navigate("/project-builder")}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all hover:scale-105"
+              style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.25)" }}
+              title="Создать проект с AI">
+              <Icon name="Sparkles" size={13} />
+              <span className="hidden sm:inline">Создать свой проект</span>
+            </button>
             <button onClick={() => navigate("/staff")}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all hover:bg-white/10"
               style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.45)" }}

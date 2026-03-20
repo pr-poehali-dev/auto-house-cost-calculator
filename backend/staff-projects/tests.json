@@ -1,9 +1,17 @@
 {
   "tests": [
     {
+      "name": "Public project list",
+      "method": "GET",
+      "path": "/?action=public_list",
+      "expectedStatus": 200,
+      "expectedBody": {"projects": []},
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "Get projects without token",
       "method": "GET",
-      "path": "/",
+      "path": "/?action=list",
       "expectedStatus": 401
     }
   ]

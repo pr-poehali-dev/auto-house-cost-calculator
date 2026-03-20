@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
+import ProjectPanel from "@/components/ProjectEditor";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -231,10 +232,11 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [form, setForm] = useState({ name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4, price: 5000000, tag: "", tag_color: "#FF6B1A", description: "", features: "", is_active: true });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [openProjectId, setOpenProjectId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await authFetch(PROJECTS_URL, {}, token);
+    const res = await authFetch(`${PROJECTS_URL}?action=list`, {}, token);
     setProjects(res.projects || []);
     setLoading(false);
   }, [token]);
@@ -255,9 +257,9 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
 
   const save = async () => {
     setSaving(true); setMsg("");
-    const url = editingId ? `${PROJECTS_URL}/${editingId}` : PROJECTS_URL;
-    const method = editingId ? "PUT" : "POST";
-    const res = await authFetch(url, { method, body: JSON.stringify(form) }, token);
+    const action = editingId ? "update" : "create";
+    const body = editingId ? { ...form, project_id: editingId } : form;
+    const res = await authFetch(`${PROJECTS_URL}?action=${action}`, { method: "POST", body: JSON.stringify(body) }, token);
     setSaving(false);
     if (res.ok) { setMsg("Сохранено!"); setShowForm(false); load(); }
     else setMsg(res.error || "Ошибка");
@@ -383,13 +385,20 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
               <div className="font-display font-bold text-base" style={{ color: p.tag_color }}>
                 {(p.price / 1_000_000).toFixed(1)} млн ₽
               </div>
-              <div className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.25)" }}>
-                {p.updated_at ? new Date(p.updated_at).toLocaleDateString("ru-RU") : "—"}
-              </div>
+              <button onClick={e => { e.stopPropagation(); setOpenProjectId(p.id); }}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02]"
+                style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.2)" }}>
+                <Icon name="Images" size={13} /> Файлы и ведомость
+              </button>
             </div>
           ))}
         </div>
       )}
+
+      {openProjectId && (() => {
+        const p = projects.find(pr => pr.id === openProjectId);
+        return p ? <ProjectPanel project={p} token={token} role="architect" onClose={() => setOpenProjectId(null)} /> : null;
+      })()}
     </div>
   );
 }
@@ -397,6 +406,7 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
 // ─── Constructor cabinet ───────────────────────────────────────────────────────
 function ConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [projects, setProjects] = useState<HouseProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -404,11 +414,15 @@ function ConstructorCabinet({ user, token }: { user: StaffUser; token: string })
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [filterCat, setFilterCat] = useState("Все");
+  const [openProjectId, setOpenProjectId] = useState<number | null>(null);
+  const [activeConTab, setActiveConTab] = useState<"materials" | "specs">("materials");
 
   const load = useCallback(async () => {
     setLoading(true);
     const res = await authFetch(MATERIALS_URL, {}, token);
     setMaterials(res.items || []);
+    const pr = await authFetch(`${PROJECTS_URL}?action=list`, {}, token);
+    setProjects(pr.projects || []);
     setLoading(false);
   }, [token]);
 
@@ -439,19 +453,60 @@ function ConstructorCabinet({ user, token }: { user: StaffUser; token: string })
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
           <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-orange)" }}>Конструктор</div>
-          <h2 className="font-display text-2xl font-bold text-white">Материалы и работы</h2>
+          <h2 className="font-display text-2xl font-bold text-white">Конструктор</h2>
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Добро пожаловать, {user.full_name}</p>
         </div>
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-          style={{ background: "var(--neon-orange)", color: "#fff", boxShadow: "0 0 20px rgba(255,107,26,0.3)" }}>
-          <Icon name="Plus" size={15} />
-          Добавить позицию
-        </button>
+        {activeConTab === "materials" && (
+          <button onClick={openNew}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{ background: "var(--neon-orange)", color: "#fff", boxShadow: "0 0 20px rgba(255,107,26,0.3)" }}>
+            <Icon name="Plus" size={15} />Добавить позицию
+          </button>
+        )}
       </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-5 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)" }}>
+        {[{id:"materials",label:"Материалы",icon:"Package"},{id:"specs",label:"Ведомости",icon:"ClipboardList"}].map(t => (
+          <button key={t.id} onClick={() => setActiveConTab(t.id as "materials"|"specs")}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            style={{ background: activeConTab === t.id ? "var(--neon-orange)" : "transparent", color: activeConTab === t.id ? "#fff" : "rgba(255,255,255,0.5)" }}>
+            <Icon name={t.icon} size={14} />{t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Specs tab */}
+      {activeConTab === "specs" && (
+        <div className="space-y-3">
+          {projects.map((p, i) => (
+            <div key={p.id} className="rounded-2xl p-4 flex items-center justify-between cursor-pointer transition-all hover:bg-white/5"
+              style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", animation: `fadeInUp 0.4s ease-out ${i*0.04}s both` }}>
+              <div>
+                <div className="font-display font-semibold text-white">{p.name}</div>
+                <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{p.type} · {p.area} м² · {p.floors} эт.</div>
+              </div>
+              <button onClick={() => setOpenProjectId(p.id)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+                style={{ background: "rgba(255,107,26,0.12)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.25)" }}>
+                <Icon name="ClipboardList" size={14} /> Открыть ведомость
+              </button>
+            </div>
+          ))}
+          {projects.length === 0 && <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>Нет проектов</div>}
+        </div>
+      )}
+
+      {openProjectId && (() => {
+        const p = projects.find(pr => pr.id === openProjectId);
+        return p ? <ProjectPanel project={p} token={token} role="constructor" onClose={() => setOpenProjectId(null)} /> : null;
+      })()}
+
+      {/* Materials tab */}
+      {activeConTab === "materials" && <>
 
       {/* Form */}
       {showForm && (
@@ -557,6 +612,7 @@ function ConstructorCabinet({ user, token }: { user: StaffUser; token: string })
           )}
         </div>
       )}
+      </>}
     </div>
   );
 }

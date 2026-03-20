@@ -276,5 +276,128 @@ def handler(event, context):
         answer = get_openai_response(clean, role)
         return resp({"reply": answer})
 
+    # ── AI генерация проекта по предпочтениям заказчика ──
+    if action == "ai_generate_project":
+        conn.close()
+        prefs = body.get("preferences", {})
+        if not prefs:
+            return resp({"error": "preferences обязательны"}, 400)
+
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            return resp({"error": "OPENAI_API_KEY не настроен"}, 500)
+
+        # Формируем промпт описания
+        desc_prompt = f"""Создай профессиональное описание проекта частного дома на основе предпочтений заказчика.
+
+Предпочтения:
+- Бюджет: {prefs.get('budget', 'не указан')} ₽
+- Площадь: {prefs.get('area', 'не указана')} м²
+- Этажей: {prefs.get('floors', 'не указано')}
+- Количество комнат: {prefs.get('rooms', 'не указано')}
+- Стиль: {prefs.get('style', 'современный')}
+- Тип: {prefs.get('house_type', 'кирпичный')}
+- Особые пожелания: {prefs.get('wishes', 'нет')}
+
+Напиши:
+1. Название проекта (1 строка, без кавычек)
+2. Описание (2-3 предложения, поэтично и профессионально)
+3. 3-4 ключевые особенности через запятую (без перечисления номерами)
+4. Рекомендуемый тег (1 слово: Популярный/Хит/Премиум/Новинка/Бюджет/Люкс)
+
+Формат ответа строго JSON:
+{{"name": "...", "description": "...", "features": "особ1, особ2, особ3", "tag": "..."}}"""
+
+        desc_messages = [{"role": "user", "content": desc_prompt}]
+        desc_payload = {"model": "gpt-4o-mini", "messages": desc_messages, "max_tokens": 512, "temperature": 0.8, "response_format": {"type": "json_object"}}
+
+        try:
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/chat/completions",
+                data=json.dumps(desc_payload).encode(),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
+                result = json.loads(r.read().decode())
+            desc_text = result["choices"][0]["message"]["content"]
+            try:
+                desc_data = json.loads(desc_text)
+            except:
+                desc_data = {"name": "Мой проект", "description": desc_text, "features": "", "tag": "Новинка"}
+        except Exception as e:
+            return resp({"error": f"Ошибка генерации описания: {str(e)}"}, 500)
+
+        # Генерация рендера через DALL-E 3
+        style_map = {
+            "современный": "modern minimalist",
+            "классический": "classic traditional",
+            "скандинавский": "Scandinavian",
+            "хай-тек": "high-tech futuristic",
+            "барокко": "baroque",
+            "прованс": "French Provence",
+            "лофт": "loft industrial",
+        }
+        style_en = style_map.get(prefs.get("style","современный"), "modern")
+        house_type_en = {
+            "кирпичный":"brick","каркасный":"wooden frame","монолитный":"concrete monolithic",
+            "деревянный":"wooden log","газобетон":"aerated concrete","модульный":"modular"
+        }.get(prefs.get("house_type","кирпичный"), "brick")
+
+        dalle_prompt = (
+            f"Architectural rendering of a {style_en} {house_type_en} private house, "
+            f"{prefs.get('floors',2)} floors, {prefs.get('area',150)} square meters, "
+            f"photorealistic exterior view, professional architectural visualization, "
+            f"dramatic lighting, landscaped surroundings, ultra-detailed, 8K quality"
+        )
+
+        render_url = ""
+        try:
+            dalle_payload = {"model": "dall-e-3", "prompt": dalle_prompt, "n": 1, "size": "1024x1024", "quality": "standard"}
+            req2 = urllib.request.Request(
+                "https://api.openai.com/v1/images/generations",
+                data=json.dumps(dalle_payload).encode(),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req2, timeout=60) as r2:
+                img_result = json.loads(r2.read().decode())
+            render_url = img_result["data"][0]["url"]
+        except Exception as e:
+            render_url = ""  # Рендер не критичен
+
+        # Сохраняем заявку в БД
+        conn2 = db()
+        try:
+            cur = conn2.cursor()
+            cur.execute(f"""INSERT INTO {S}.ai_project_requests
+                (client_name,client_phone,client_email,preferences,generated_description,generated_render_url,status)
+                VALUES (%s,%s,%s,%s,%s,%s,'done') RETURNING id""",
+                (prefs.get("client_name",""), prefs.get("client_phone",""), prefs.get("client_email",""),
+                 json.dumps(prefs, ensure_ascii=False), desc_data.get("description",""), render_url))
+            req_id = cur.fetchone()[0]
+            conn2.commit(); cur.close()
+        except:
+            req_id = None
+        finally:
+            conn2.close()
+
+        return resp({
+            "ok": True,
+            "request_id": req_id,
+            "name": desc_data.get("name", "Мой проект"),
+            "description": desc_data.get("description", ""),
+            "features": desc_data.get("features", ""),
+            "tag": desc_data.get("tag", "Новинка"),
+            "render_url": render_url,
+            "suggested": {
+                "type": prefs.get("house_type", "Кирпичный").capitalize(),
+                "area": prefs.get("area", 150),
+                "floors": prefs.get("floors", 2),
+                "rooms": prefs.get("rooms", 4),
+                "price": prefs.get("budget", 5000000),
+            }
+        })
+
     conn.close()
     return resp({"error":"Not found"}, 404)
