@@ -25,14 +25,7 @@ function apiFetch(url: string, opts: RequestInit = {}, token?: string) {
 
 function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res((reader.result as string).split(",")[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-}
+
 
 // ─── interfaces ──────────────────────────────────────────────────────────────
 
@@ -406,14 +399,25 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const uploadFile = async (file: File) => {
     setUploading(true); setUploadMsg("");
     try {
-      const file_data = await fileToBase64(file);
       const r = await apiFetch(`${PROJECTS_URL}?action=upload_file`, {
         method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_data, file_name: file.name, file_type: selectedFileType }),
+        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType }),
       }, token);
-      if (r.ok) { setUploadMsg("Файл загружен!"); loadProject(); onRefresh(); }
-      else setUploadMsg(r.error || "Ошибка загрузки");
-    } catch { setUploadMsg("Ошибка"); }
+      if (!r.presigned_url) { setUploadMsg(r.error || "Ошибка получения ссылки"); setUploading(false); return; }
+
+      await fetch(r.presigned_url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": r.content_type },
+      });
+
+      const r2 = await apiFetch(`${PROJECTS_URL}?action=confirm_upload`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType, cdn_url: r.cdn_url }),
+      }, token);
+      if (r2.ok) { setUploadMsg("Файл загружен!"); loadProject(); onRefresh(); }
+      else setUploadMsg(r2.error || "Ошибка подтверждения");
+    } catch { setUploadMsg("Ошибка загрузки"); }
     setUploading(false);
   };
 
