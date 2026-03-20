@@ -375,17 +375,18 @@ def handler(event: dict, context) -> dict:
         tc_id = body.get("id")
         if not tc_id: conn.close(); return resp({"error":"id обязателен"}, 400)
         cur = conn.cursor()
-        cur.execute(f"SELECT id,title,category,description,content FROM {S}.tech_cards WHERE id=%s AND is_active=TRUE", (tc_id,))
+        cur.execute(f"SELECT id,title,category,description,content,COALESCE(source_text,'') FROM {S}.tech_cards WHERE id=%s AND is_active=TRUE", (tc_id,))
         row = cur.fetchone()
         if not row: cur.close(); conn.close(); return resp({"error":"Карта не найдена"}, 404)
 
-        card_id, title, category, description, content = row
+        card_id, title, category, description, content, source_text = row
         steps_text = "\n".join(f"Шаг {s['step']}: {s['name']} — {s['desc']}" for s in (content or []))
 
         api_key = os.environ.get("OPENAI_API_KEY","")
         resources = []
 
         if api_key:
+            source_section = f"\nИсходный текст файла ТТК:\n{source_text[:5000]}\n" if source_text and source_text.strip() else ""
             prompt = f"""Ты — эксперт-сметчик в строительстве. Проанализируй технологическую карту и составь полный список необходимых материалов и ресурсов.
 
 Технологическая карта: «{title}»
@@ -394,7 +395,7 @@ def handler(event: dict, context) -> dict:
 
 Технологические шаги:
 {steps_text}
-
+{source_section}
 Составь JSON-список ресурсов. Каждый ресурс — это:
 - type: "material" (материал) | "tool" (инструмент/механизм) | "labor" (трудозатраты)
 - name: точное наименование
@@ -409,24 +410,29 @@ def handler(event: dict, context) -> dict:
 ]
 
 Требования:
+- Если есть исходный текст файла — извлеки из него РЕАЛЬНЫЕ нормы расхода
 - Укажи ВСЕ материалы, включая расходники (крепёж, плёнки, ленты)
 - Укажи основной инструмент и механизмы
 - Укажи трудозатраты (ч/чел на ед. работы)
 - Нормы расхода — реальные строительные нормативы"""
 
             try:
+                print(f"[fill_resources] id={card_id}, title={title}, source_text_len={len(source_text)}")
                 data = json.dumps({"model":"gpt-4o","messages":[{"role":"user","content":prompt}],
-                                   "temperature":0.1,"max_tokens":2500}, ensure_ascii=False).encode()
+                                   "temperature":0.1,"max_tokens":3000}, ensure_ascii=False).encode()
                 req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
                     headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
-                with urllib.request.urlopen(req, timeout=40) as r:
+                with urllib.request.urlopen(req, timeout=50) as r:
                     result = json.loads(r.read())
                 content_str = result["choices"][0]["message"]["content"].strip()
                 match = re.search(r'\[.*\]', content_str, re.DOTALL)
                 if match:
                     resources = json.loads(match.group())
-            except Exception:
-                pass
+                    print(f"[fill_resources] OK: {len(resources)} resources")
+                else:
+                    print(f"[fill_resources] no JSON array in response")
+            except Exception as e:
+                print(f"[fill_resources] GPT FAILED: {e}")
 
         # Сохраняем в БД
         cur.execute(f"UPDATE {S}.tech_cards SET resources=%s, updated_at=NOW() WHERE id=%s",
@@ -480,39 +486,70 @@ def handler(event: dict, context) -> dict:
         file_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{s3key}"
 
         # Извлекаем текст для AI
+        import io as _io
         text_content = ""
+        parse_error = ""
         if ext == "pdf":
-            # Для PDF — пробуем опциональный pdfplumber, fallback — передаём имя файла
             try:
-                import pdfplumber, io
-                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                import pdfplumber
+                with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
                     pages_text = []
-                    for page in pdf.pages[:10]:
+                    for page in pdf.pages[:15]:
                         t = page.extract_text()
                         if t: pages_text.append(t)
-                    text_content = "\n".join(pages_text)[:6000]
-            except Exception:
-                text_content = f"Файл: {file_name}"
+                    text_content = "\n".join(pages_text)[:8000]
+                print(f"[tech_card_upload] pdfplumber OK, chars={len(text_content)}")
+            except Exception as e:
+                parse_error = str(e)
+                print(f"[tech_card_upload] pdfplumber FAILED: {e}")
+                try:
+                    import pypdf
+                    reader = pypdf.PdfReader(_io.BytesIO(file_bytes))
+                    pages_text = []
+                    for page in reader.pages[:15]:
+                        t = page.extract_text()
+                        if t: pages_text.append(t)
+                    text_content = "\n".join(pages_text)[:8000]
+                    print(f"[tech_card_upload] pypdf OK, chars={len(text_content)}")
+                except Exception as e2:
+                    print(f"[tech_card_upload] pypdf FAILED: {e2}")
         elif ext in ("xlsx","xls","csv"):
             try:
-                import openpyxl, io
-                wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+                import openpyxl
+                wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), read_only=True, data_only=True)
                 rows_text = []
                 for sheet in wb.worksheets[:3]:
-                    for row in sheet.iter_rows(max_row=200, values_only=True):
+                    for row in sheet.iter_rows(max_row=300, values_only=True):
                         vals = [str(v) for v in row if v is not None and str(v).strip()]
                         if vals: rows_text.append(" | ".join(vals))
-                text_content = "\n".join(rows_text[:300])[:6000]
-            except Exception:
-                text_content = f"Файл: {file_name}"
+                text_content = "\n".join(rows_text[:400])[:8000]
+                print(f"[tech_card_upload] openpyxl OK, chars={len(text_content)}")
+            except Exception as e:
+                print(f"[tech_card_upload] openpyxl FAILED: {e}")
+        elif ext in ("doc","docx"):
+            try:
+                import zipfile, xml.etree.ElementTree as ET
+                with zipfile.ZipFile(_io.BytesIO(file_bytes)) as z:
+                    xml_content = z.read("word/document.xml")
+                root = ET.fromstring(xml_content)
+                ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+                texts = [node.text for node in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t") if node.text]
+                text_content = " ".join(texts)[:8000]
+                print(f"[tech_card_upload] docx OK, chars={len(text_content)}")
+            except Exception as e:
+                print(f"[tech_card_upload] docx FAILED: {e}")
 
         # Если текст не извлечён — используем имя файла как подсказку
         if not text_content.strip():
             text_content = f"Файл технологической карты: {file_name}"
+            print(f"[tech_card_upload] NO TEXT extracted, using filename only")
+        else:
+            print(f"[tech_card_upload] text preview: {text_content[:200]}")
 
         # GPT: парсим структуру техкарты + ресурсы в одном запросе
         api_key = os.environ.get("OPENAI_API_KEY","")
-        parsed = {"title": file_name.rsplit(".",1)[0], "category": "Прочее", "description": "", "content": [], "resources": []}
+        base_title = file_name.rsplit(".",1)[0]
+        parsed = {"title": base_title, "category": "Прочее", "description": "", "content": [], "resources": []}
 
         if api_key:
             prompt = f"""Ты — эксперт по строительным технологическим картам и сметному нормированию. Проанализируй содержимое файла и извлеки ПОЛНУЮ структурированную информацию.
@@ -544,32 +581,38 @@ def handler(event: dict, context) -> dict:
 - unit: м², м³, шт, кг, т, пм, ч/чел, маш-ч"""
 
             try:
+                print(f"[tech_card_upload] calling GPT-4o, text_len={len(text_content)}")
                 data = json.dumps({"model":"gpt-4o","messages":[{"role":"user","content":prompt}],
                                    "temperature":0.1,"max_tokens":4000}, ensure_ascii=False).encode()
                 req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
                     headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
-                with urllib.request.urlopen(req, timeout=55) as r:
+                with urllib.request.urlopen(req, timeout=50) as r:
                     result = json.loads(r.read())
                 content_str = result["choices"][0]["message"]["content"].strip()
+                print(f"[tech_card_upload] GPT response len={len(content_str)}, preview={content_str[:100]}")
                 match = re.search(r'\{.*\}', content_str, re.DOTALL)
                 if match:
                     parsed = json.loads(match.group())
-                    if not isinstance(parsed.get("content"), list):
-                        parsed["content"] = []
-                    if not isinstance(parsed.get("resources"), list):
-                        parsed["resources"] = []
-            except Exception:
-                pass
+                    if not isinstance(parsed.get("content"), list): parsed["content"] = []
+                    if not isinstance(parsed.get("resources"), list): parsed["resources"] = []
+                    print(f"[tech_card_upload] parsed OK: steps={len(parsed['content'])}, resources={len(parsed['resources'])}")
+                else:
+                    print(f"[tech_card_upload] no JSON match in GPT response")
+            except Exception as e:
+                print(f"[tech_card_upload] GPT FAILED: {e}")
+        else:
+            print(f"[tech_card_upload] no OPENAI_API_KEY")
 
-        # Сохраняем в БД (включая ресурсы)
+        # Сохраняем в БД (включая ресурсы и исходный текст для повторного анализа)
         cur = conn.cursor()
         cur.execute(f"""
-            INSERT INTO {S}.tech_cards (title, category, description, content, resources, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
-        """, (parsed.get("title", file_name), parsed.get("category","Прочее"),
+            INSERT INTO {S}.tech_cards (title, category, description, content, resources, source_text, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+        """, (parsed.get("title", base_title), parsed.get("category","Прочее"),
               parsed.get("description",""),
               json.dumps(parsed.get("content",[]), ensure_ascii=False),
               json.dumps(parsed.get("resources",[]), ensure_ascii=False),
+              text_content,
               staff["id"]))
         new_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
