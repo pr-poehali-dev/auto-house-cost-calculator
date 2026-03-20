@@ -38,111 +38,149 @@ def get_staff(conn, token):
     r = cur.fetchone(); cur.close()
     return {"id":r[0],"full_name":r[1],"role_code":r[2]} if r else None
 
-def call_openai(text: str, materials_context: str) -> list:
-    """Отправляет текст спецификации в GPT-4o, получает список позиций ВОР"""
-    api_key = os.environ.get("OPENAI_API_KEY","")
+SPEC_PROMPT = """Ты — ассистент строительной компании. Перед тобой спецификация или ведомость объёмов работ строительного проекта.
+
+Извлеки ВСЕ позиции работ и материалов и верни их в виде JSON-массива.
+
+Для каждой позиции:
+- section: раздел/категория ("Фундамент", "Стены", "Кровля", "Отделка", "Электрика", "Сантехника" и т.д.)
+- name: название работы или материала
+- unit: единица измерения (м², м³, пм, шт, т, кг, л, компл)
+- qty: количество (число, 0 если не указано)
+- price_per_unit: цена за единицу в рублях (0 если не указана)
+- note: примечание, марка, артикул
+
+Верни ТОЛЬКО валидный JSON-массив без пояснений:
+[{"section":"...","name":"...","unit":"...","qty":0,"price_per_unit":0,"note":"..."}]"""
+
+def _openai_request(payload: dict, api_key: str) -> dict:
+    data = json.dumps(payload, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read())
+
+def _parse_items(content: str) -> list:
+    match = re.search(r'\[.*\]', content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except:
+            pass
+    return []
+
+def call_openai_text(text: str, materials_context: str) -> list:
+    """Разбор текстовой спецификации через GPT-4o-mini"""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        return []
+    prompt = f"{SPEC_PROMPT}\n\nБаза материалов для сопоставления цен:\n{materials_context}\n\nТекст спецификации:\n{text[:12000]}"
+    result = _openai_request({
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 4000,
+    }, api_key)
+    return _parse_items(result["choices"][0]["message"]["content"].strip())
+
+def call_openai_vision(images_b64: list, materials_context: str) -> list:
+    """OCR сканированного PDF через GPT-4o Vision — передаём страницы как изображения"""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         return []
 
-    prompt = f"""Ты — ассистент строительной компании. Тебе дан текст спецификации или ведомости из строительного проекта.
+    content = [{"type": "text", "text": f"{SPEC_PROMPT}\n\nБаза материалов:\n{materials_context}\n\nИзвлеки позиции из изображений ниже:"}]
+    for b64 in images_b64[:6]:  # не более 6 страниц
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "high"}})
 
-Твоя задача: извлечь все позиции работ и материалов и вернуть их в виде JSON-массива.
-
-Для каждой позиции определи:
-- section: раздел/категория (например: "Фундамент", "Стены", "Кровля", "Отделка")
-- name: название материала или работы
-- unit: единица измерения (м², м³, пм, шт, т, кг)
-- qty: количество (число, если не указано — поставь 0)
-- price_per_unit: цена за единицу в рублях (если не указана — попробуй найти в базе материалов ниже, если нет — поставь 0)
-- note: примечание (марка, артикул, характеристики)
-
-База материалов для сопоставления цен:
-{materials_context}
-
-Верни ТОЛЬКО валидный JSON-массив без пояснений:
-[{{"section":"...","name":"...","unit":"...","qty":0,"price_per_unit":0,"note":"..."}}]
-
-Текст спецификации:
-{text[:8000]}"""
-
-    payload = json.dumps({
-        "model": "gpt-4o-mini",
-        "messages": [{"role":"user","content": prompt}],
+    result = _openai_request({
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": content}],
         "temperature": 0.1,
         "max_tokens": 4000,
-    }).encode()
+    }, api_key)
+    return _parse_items(result["choices"][0]["message"]["content"].strip())
 
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        result = json.loads(r.read())
-    content = result["choices"][0]["message"]["content"].strip()
-    # Извлекаем JSON из ответа
-    match = re.search(r'\[.*\]', content, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return []
+def extract_text_from_pdf(file_data: bytes) -> str:
+    """Извлекает встроенный текст из PDF (работает только для текстовых PDF, не сканов)"""
+    try:
+        text = file_data.decode("latin-1", errors="ignore")
+        # Поток BT...ET содержит текстовые объекты
+        chunks = re.findall(r'\(([^)]{1,200})\)', text)
+        readable = []
+        for chunk in chunks:
+            cleaned = chunk.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ").strip()
+            if len(cleaned) > 2 and any(c.isalpha() for c in cleaned):
+                readable.append(cleaned)
+        return " | ".join(readable[:600])
+    except:
+        return ""
 
-def extract_text_from_file(file_data: bytes, file_name: str) -> str:
-    """Базовое извлечение текста из PDF или Excel (без внешних библиотек)"""
-    ext = file_name.rsplit(".",1)[-1].lower() if "." in file_name else ""
+def extract_images_from_pdf(file_data: bytes) -> list:
+    """Извлекает изображения страниц из PDF-скана (JPEG/PNG потоки)"""
+    try:
+        import io, struct, zlib
+        images = []
+        # Ищем встроенные JPEG (начинаются с FFD8FF)
+        pos = 0
+        while pos < len(file_data) - 4:
+            idx = file_data.find(b'\xff\xd8\xff', pos)
+            if idx == -1:
+                break
+            # Ищем конец JPEG (FFD9)
+            end = file_data.find(b'\xff\xd9', idx + 2)
+            if end != -1 and end - idx > 5000:  # минимум 5кб — реальное изображение
+                img_bytes = file_data[idx:end + 2]
+                images.append(base64.b64encode(img_bytes).decode())
+                if len(images) >= 6:
+                    break
+            pos = idx + 3
+        return images
+    except:
+        return []
+
+def extract_text_from_file(file_data: bytes, file_name: str) -> tuple:
+    """Возвращает (text, images_b64) — text для текстовых PDF, images для сканов"""
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
 
     if ext == "pdf":
-        # Простое извлечение текста из PDF через поиск читаемых строк
-        try:
-            text = file_data.decode("latin-1", errors="ignore")
-            # Извлекаем текстовые объекты PDF
-            import re
-            chunks = re.findall(r'\((.*?)\)', text)
-            readable = []
-            for chunk in chunks:
-                cleaned = chunk.replace("\\n"," ").replace("\\r"," ").strip()
-                if len(cleaned) > 2 and any(c.isalpha() for c in cleaned):
-                    readable.append(cleaned)
-            return " | ".join(readable[:500])
-        except:
-            return ""
+        text = extract_text_from_pdf(file_data)
+        # Если текста мало — скорее всего скан, пробуем извлечь изображения
+        if len(text) < 200:
+            images = extract_images_from_pdf(file_data)
+            return ("", images)
+        return (text, [])
 
-    elif ext in ("xlsx","xls","csv"):
-        # Для CSV — прямое чтение
+    elif ext in ("xlsx", "xls", "csv"):
         if ext == "csv":
             try:
-                return file_data.decode("utf-8", errors="ignore")[:10000]
+                return (file_data.decode("utf-8", errors="ignore")[:12000], [])
             except:
-                return file_data.decode("cp1251", errors="ignore")[:10000]
-        # Для xlsx — извлекаем XML из zip
+                return (file_data.decode("cp1251", errors="ignore")[:12000], [])
         try:
             import zipfile, io
             with zipfile.ZipFile(io.BytesIO(file_data)) as z:
-                # Читаем shared strings
                 strings = []
                 if "xl/sharedStrings.xml" in z.namelist():
-                    ss_xml = z.read("xl/sharedStrings.xml").decode("utf-8","ignore")
+                    ss_xml = z.read("xl/sharedStrings.xml").decode("utf-8", "ignore")
                     strings = re.findall(r'<t[^>]*>([^<]+)</t>', ss_xml)
-                # Читаем первый лист
                 sheet_files = [n for n in z.namelist() if n.startswith("xl/worksheets/sheet")]
                 if sheet_files:
-                    sheet_xml = z.read(sheet_files[0]).decode("utf-8","ignore")
-                    # Числа
+                    sheet_xml = z.read(sheet_files[0]).decode("utf-8", "ignore")
                     nums = re.findall(r'<v>([^<]+)</v>', sheet_xml)
-                    # Индексы строк
                     str_refs = re.findall(r't="s"[^>]*><v>(\d+)</v>', sheet_xml)
-                    row_data = []
-                    for ref in str_refs:
-                        idx = int(ref)
-                        if idx < len(strings):
-                            row_data.append(strings[idx])
+                    row_data = [strings[int(r)] for r in str_refs if int(r) < len(strings)]
                     row_data.extend(nums[:200])
-                    return " | ".join(row_data[:500])
+                    return (" | ".join(row_data[:600]), [])
         except:
             pass
-        return ""
+        return ("", [])
 
-    return ""
+    return ("", [])
 
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
@@ -221,21 +259,30 @@ def handler(event: dict, context) -> dict:
         mats = cur.fetchall()
         mat_ctx = "\n".join([f"{r[3]} | {r[0]} | {r[1]} | {r[2]}₽" for r in mats[:150]])
 
-        # Извлекаем текст из файла
-        extracted_text = extract_text_from_file(file_bytes, file_name)
+        # Извлекаем текст или изображения из файла
+        extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name)
 
         ai_items = []
         error_msg = ""
+        mode = "text"
 
         if not os.environ.get("OPENAI_API_KEY"):
             error_msg = "OPENAI_API_KEY не настроен — добавьте ключ в секреты проекта"
-        elif not extracted_text:
-            error_msg = "Не удалось извлечь текст из файла"
-        else:
+        elif extracted_text:
+            # Текстовый PDF — быстрый GPT-4o-mini
             try:
-                ai_items = call_openai(extracted_text, mat_ctx)
+                ai_items = call_openai_text(extracted_text, mat_ctx)
             except Exception as e:
                 error_msg = str(e)
+        elif images_b64:
+            # Скан PDF — OCR через GPT-4o Vision
+            mode = "ocr"
+            try:
+                ai_items = call_openai_vision(images_b64, mat_ctx)
+            except Exception as e:
+                error_msg = str(e)
+        else:
+            error_msg = "Не удалось извлечь данные из файла. Убедитесь что файл не повреждён."
 
         # Обновляем статус upload
         status = "done" if ai_items else ("error" if error_msg else "empty")
@@ -251,7 +298,9 @@ def handler(event: dict, context) -> dict:
             "status": status,
             "items": ai_items,
             "error": error_msg,
+            "mode": mode,
             "extracted_chars": len(extracted_text),
+            "ocr_pages": len(images_b64),
         })
 
     # ── Получить список загрузок по проекту ──────────────────────────────────
