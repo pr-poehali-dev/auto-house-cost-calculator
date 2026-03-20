@@ -845,8 +845,35 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
                 <Icon name="ChevronLeft" size={15} /> К списку
               </button>
               <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(251,191,36,0.25)" }}>
-                <div className="font-display font-bold text-xl text-white mb-1">{selectedRfq.title}</div>
+                <div className="flex items-center flex-wrap gap-2 mb-1">
+                  <div className="font-display font-bold text-xl text-white">{selectedRfq.title}</div>
+                  {selectedRfq.source_type === "project" && (
+                    <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
+                      style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.25)" }}>
+                      <Icon name="FolderOpen" size={10} /> Из проекта
+                    </span>
+                  )}
+                  {selectedRfq.source_type === "order" && (
+                    <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
+                      style={{ background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+                      <Icon name="UserCheck" size={10} /> Заказ клиента
+                    </span>
+                  )}
+                </div>
                 <div className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>📍 {selectedRfq.construction_address} · {selectedRfq.area} м² · {selectedRfq.floors} эт.</div>
+                {selectedRfq.source_type === "order" && selectedRfq.customer_name && (
+                  <div className="mt-2 flex items-center gap-3 text-sm px-3 py-2 rounded-xl"
+                    style={{ background: "rgba(0,212,255,0.07)", border: "1px solid rgba(0,212,255,0.15)" }}>
+                    <Icon name="User" size={14} style={{ color: "var(--neon-cyan)" }} />
+                    <span style={{ color: "rgba(255,255,255,0.8)" }}>{selectedRfq.customer_name}</span>
+                    {selectedRfq.customer_phone && (
+                      <a href={`tel:${selectedRfq.customer_phone}`} className="flex items-center gap-1 hover:underline"
+                        style={{ color: "var(--neon-cyan)" }}>
+                        <Icon name="Phone" size={12} /> {selectedRfq.customer_phone}
+                      </a>
+                    )}
+                  </div>
+                )}
                 <div className="flex gap-2 mt-3 flex-wrap">
                   <button onClick={() => notifySuppliers(selectedRfq.id)}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
