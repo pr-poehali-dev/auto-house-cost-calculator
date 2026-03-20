@@ -510,12 +510,12 @@ def handler(event: dict, context) -> dict:
         if not text_content.strip():
             text_content = f"Файл технологической карты: {file_name}"
 
-        # GPT: парсим структуру техкарты
+        # GPT: парсим структуру техкарты + ресурсы в одном запросе
         api_key = os.environ.get("OPENAI_API_KEY","")
-        parsed = {"title": file_name.rsplit(".",1)[0], "category": "Прочее", "description": "", "content": []}
+        parsed = {"title": file_name.rsplit(".",1)[0], "category": "Прочее", "description": "", "content": [], "resources": []}
 
         if api_key:
-            prompt = f"""Ты — эксперт по строительным технологическим картам. Проанализируй содержимое файла и извлеки структурированную информацию.
+            prompt = f"""Ты — эксперт по строительным технологическим картам и сметному нормированию. Проанализируй содержимое файла и извлеки ПОЛНУЮ структурированную информацию.
 
 Содержимое файла:
 {text_content}
@@ -524,21 +524,31 @@ def handler(event: dict, context) -> dict:
 {{
   "title": "Название технологической карты",
   "category": "Одна из: Фундамент | Стены | Кровля | Полы | Окна и двери | Отделка | Инженерия | Земляные работы | Прочее",
-  "description": "Краткое описание (1-2 предложения)",
+  "description": "Краткое описание работ (1-2 предложения)",
   "content": [
     {{"step": 1, "name": "Название операции", "desc": "Подробное описание", "duration": "X дней/часов"}},
     ...
+  ],
+  "resources": [
+    {{"type": "material", "name": "Наименование материала", "unit": "м²", "qty_per_unit": 1.05, "note": "Марка, ГОСТ"}},
+    {{"type": "tool", "name": "Инструмент/механизм", "unit": "шт", "qty_per_unit": 1, "note": ""}},
+    {{"type": "labor", "name": "Рабочий-строитель", "unit": "ч/чел", "qty_per_unit": 2.5, "note": "на 1 м²"}}
   ]
 }}
 
-Если в файле менее 3 шагов — придумай логичные шаги на основе названия карты."""
+Правила:
+- content: если в файле менее 3 шагов — составь логичные шаги на основе названия карты
+- resources: извлеки из текста файла ВСЕ материалы с нормами расхода, инструмент и трудозатраты; если явно не указано — рассчитай по строительным нормативам (ГЭСНам)
+- type: "material" — материалы и расходники, "tool" — инструмент и механизмы, "labor" — трудозатраты
+- qty_per_unit — количество на единицу результата (1 м², 1 м³ и т.д.), дробное число
+- unit: м², м³, шт, кг, т, пм, ч/чел, маш-ч"""
 
             try:
-                data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
-                                   "temperature":0.2,"max_tokens":2000}, ensure_ascii=False).encode()
+                data = json.dumps({"model":"gpt-4o","messages":[{"role":"user","content":prompt}],
+                                   "temperature":0.1,"max_tokens":4000}, ensure_ascii=False).encode()
                 req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
                     headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
-                with urllib.request.urlopen(req, timeout=30) as r:
+                with urllib.request.urlopen(req, timeout=55) as r:
                     result = json.loads(r.read())
                 content_str = result["choices"][0]["message"]["content"].strip()
                 match = re.search(r'\{.*\}', content_str, re.DOTALL)
@@ -546,23 +556,29 @@ def handler(event: dict, context) -> dict:
                     parsed = json.loads(match.group())
                     if not isinstance(parsed.get("content"), list):
                         parsed["content"] = []
+                    if not isinstance(parsed.get("resources"), list):
+                        parsed["resources"] = []
             except Exception:
                 pass
 
-        # Сохраняем в БД
+        # Сохраняем в БД (включая ресурсы)
         cur = conn.cursor()
         cur.execute(f"""
-            INSERT INTO {S}.tech_cards (title, category, description, content, created_by)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id
+            INSERT INTO {S}.tech_cards (title, category, description, content, resources, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
         """, (parsed.get("title", file_name), parsed.get("category","Прочее"),
-              parsed.get("description",""), json.dumps(parsed.get("content",[]), ensure_ascii=False),
+              parsed.get("description",""),
+              json.dumps(parsed.get("content",[]), ensure_ascii=False),
+              json.dumps(parsed.get("resources",[]), ensure_ascii=False),
               staff["id"]))
         new_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
 
         return resp({"ok": True, "id": new_id, "title": parsed.get("title",""),
                      "category": parsed.get("category",""), "description": parsed.get("description",""),
-                     "steps_count": len(parsed.get("content",[])), "file_url": file_url})
+                     "steps_count": len(parsed.get("content",[])),
+                     "resources_count": len(parsed.get("resources",[])),
+                     "file_url": file_url})
 
     # ── Удаление технологической карты ────────────────────────────────────────
     if action == "tech_card_delete":
