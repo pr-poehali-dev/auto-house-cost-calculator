@@ -1,0 +1,11 @@
+{
+  "tests": [
+    {
+      "name": "Generate invoice without token",
+      "method": "POST",
+      "path": "/?action=generate_invoice",
+      "body": {"proposal_id": 1},
+      "expectedStatus": 401
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "Login with wrong credentials",
+      "method": "POST",
+      "path": "/",
+      "body": {"email": "nobody@test.com", "password": "wrong"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "RFQ list without token",
+      "method": "GET",
+      "path": "/?action=rfq_list",
+      "expectedStatus": 404
+    }
+  ]
+}
