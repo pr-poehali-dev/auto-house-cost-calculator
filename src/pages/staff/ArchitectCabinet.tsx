@@ -572,13 +572,15 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
                 </button>
               ))}
             </div>
-            <input ref={fileRef} type="file" accept="image/*,.pdf" className="hidden"
+            <input ref={fileRef} type="file"
+              accept={["render","facade","plan","section"].includes(selectedFileType) ? "image/*" : "image/*,.pdf,.xlsx,.xls,.csv"}
+              className="hidden"
               onChange={e => e.target.files?.[0] && uploadFile(e.target.files[0])} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
               style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
               <Icon name={uploading ? "Loader" : "Upload"} size={15} />
-              {uploading ? `Загрузка... ${uploadProgress}%` : "Выбрать файл (фото, PDF)"}
+              {uploading ? `Загрузка... ${uploadProgress}%` : (["render","facade","plan","section"].includes(selectedFileType) ? "Выбрать изображение" : "Выбрать файл (фото, PDF)")}
             </button>
             {uploading && uploadProgress > 0 && (
               <div className="mt-2 w-full rounded-full overflow-hidden" style={{ height: 4, background: "rgba(255,255,255,0.08)" }}>

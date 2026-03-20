@@ -7,7 +7,9 @@ const PROJECTS_API = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c9
 
 function mapApiProject(p: Record<string, unknown>) {
   const files = (p.files as { file_type: string; file_url: string; file_name: string }[]) || [];
-  const renders = files.filter(f => f.file_type === "render").map(f => f.file_url);
+  const renders = files
+    .filter(f => f.file_type === "render" && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f.file_url))
+    .map(f => f.file_url);
   const features = p.features ? String(p.features).split("\n").filter(Boolean) : [];
   return {
     id: p.id as number,
