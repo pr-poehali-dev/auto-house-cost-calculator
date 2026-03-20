@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+import ChatWidget from "@/components/ChatWidget";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -1090,6 +1091,8 @@ export default function Index() {
         style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)", fontSize: 12 }}>
         СтройКалькулятор · Автоматический расчёт стоимости строительства · 2026
       </footer>
+
+      <ChatWidget role="visitor" />
     </div>
   );
 }

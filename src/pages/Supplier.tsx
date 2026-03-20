@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+import ChatWidget from "@/components/ChatWidget";
 
 const API = "https://functions.poehali.dev/0864e1a5-8fce-4370-a525-80d6700b50ee";
 const OPS = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
@@ -493,6 +494,8 @@ export default function SupplierPortal() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {activeTab === "rfqs" ? <RfqList token={token} /> : <MyProposals token={token} />}
       </main>
+
+      <ChatWidget role="supplier" userName={user.company_name} />
     </div>
   );
 }

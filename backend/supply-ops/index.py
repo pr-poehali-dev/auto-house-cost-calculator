@@ -1,7 +1,7 @@
 """
-supply-ops: генерация счёта PDF + операции по предложениям поставщиков
+supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент
 """
-import json, os, io, base64
+import json, os, io, base64, urllib.request, urllib.error
 import psycopg2
 from datetime import datetime
 
@@ -9,8 +9,101 @@ S = "t_p78845984_auto_house_cost_calc"
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Auth-Token, X-Supplier-Token",
+    "Access-Control-Allow-Headers": "Content-Type, X-Auth-Token, X-Supplier-Token, X-Role",
 }
+
+# ── Системные промпты по ролям ────────────────────────────────────────────────
+SYSTEM_PROMPTS = {
+    "visitor": """Ты — умный AI-ассистент строительной компании «СтройКалькулятор».
+Помогаешь посетителям сайта:
+- Объясняешь как пользоваться калькулятором стоимости строительства
+- Консультируешь по типам домов (кирпич, каркас, газобетон, дерево, монолит, модульный)
+- Рассказываешь о видах фундаментов, кровли, отделки, коммуникаций
+- Помогаешь выбрать готовый проект под бюджет и нужды
+- Отвечаешь на вопросы о ценах и сроках строительства
+- Объясняешь что входит в смету и из чего складывается стоимость
+Отвечай кратко, по-деловому, на русском языке. Если не знаешь точной цифры — давай ориентировочный диапазон.""",
+
+    "architect": """Ты — AI-помощник архитектора в компании «СтройКалькулятор».
+Помогаешь архитекторам:
+- Советуешь по планировочным решениям и типам домов
+- Помогаешь описать проект: особенности, преимущества, целевая аудитория
+- Объясняешь технические нюансы конструктива
+- Предлагаешь идеи для тегов и описаний проектов
+- Консультируешь по нормам и стандартам в строительстве
+- Помогаешь рассчитать базовые параметры проектов
+Отвечай профессионально, используй строительную терминологию.""",
+
+    "constructor": """Ты — AI-помощник конструктора в компании «СтройКалькулятор».
+Помогаешь конструкторам:
+- Консультируешь по нормам расхода материалов на м² и м³
+- Помогаешь составить правильные формулы расчёта количества материалов
+- Объясняешь технические характеристики строительных материалов
+- Советуешь по маркам бетона, арматуре, утеплителям, кровельным материалам
+- Помогаешь корректно заполнить смету
+Формулы в системе: переменная `a` = площадь, `fl` = этажи.""",
+
+    "supply": """Ты — AI-помощник снабженца в компании «СтройКалькулятор».
+Помогаешь снабженцу:
+- Советуешь как составить грамотный запрос КП поставщикам
+- Объясняешь критерии выбора поставщиков
+- Помогаешь сравнить коммерческие предложения
+- Консультируешь по логистике и срокам поставок
+- Советуешь как работать с договорами поставки
+- Помогаешь с формулировками для переписки с поставщиками""",
+
+    "engineer": """Ты — AI-помощник инженера в компании «СтройКалькулятор».
+Помогаешь инженерам:
+- Консультируешь по инженерным системам (электрика, водоснабжение, отопление, вентиляция)
+- Объясняешь нормы и требования к коммуникациям
+- Помогаешь разобраться в технической документации
+- Советуешь по современным инженерным решениям и оборудованию""",
+
+    "lawyer": """Ты — AI-помощник юриста в компании «СтройКалькулятор».
+Помогаешь юристам:
+- Консультируешь по договорам подряда и поставки в строительстве
+- Объясняешь требования к разрешительной документации
+- Помогаешь с формулировками условий договоров
+- Информируешь о законодательстве в сфере строительства (ГрК РФ, ГК РФ)
+Важно: ты даёшь информационные ответы, не юридические заключения.""",
+
+    "supplier": """Ты — AI-помощник поставщика на портале «СтройКалькулятор».
+Помогаешь поставщикам:
+- Объясняешь как правильно заполнить коммерческое предложение
+- Советуешь как выгодно представить свою продукцию
+- Помогаешь разобраться в технических требованиях к материалам
+- Консультируешь по логистике и условиям поставок
+- Отвечаешь на вопросы о работе портала""",
+}
+
+def get_openai_response(messages: list, role: str) -> str:
+    api_key = os.environ.get("OPENAI_API_KEY","")
+    if not api_key:
+        return "AI-ассистент временно недоступен. Пожалуйста, добавьте OPENAI_API_KEY в настройках."
+    system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
+    }
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read().decode())
+        return result["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        err = e.read().decode()
+        if "insufficient_quota" in err:
+            return "Баланс OpenAI исчерпан. Пополните счёт на platform.openai.com"
+        return f"Ошибка OpenAI: {e.code}"
+    except Exception as e:
+        return f"Ошибка соединения с AI: {str(e)}"
 
 def db(): return psycopg2.connect(os.environ["DATABASE_URL"])
 def resp(data, code=200):
@@ -168,6 +261,20 @@ def handler(event, context):
         """, (supplier["id"],))
         rows = cur.fetchall(); cur.close(); conn.close()
         return resp({"invoices":[{"id":r[0],"invoice_number":r[1],"amount":float(r[2]),"status":r[3],"created_at":str(r[4]),"rfq_title":r[5],"address":r[6]} for r in rows]})
+
+    # ── AI chat (не требует БД) ──
+    if action == "chat":
+        conn.close()
+        messages = body.get("messages", [])
+        role = body.get("role", "visitor")
+        if not messages:
+            return resp({"error": "messages обязательны"}, 400)
+        clean = [{"role": m["role"], "content": str(m["content"])[:4000]}
+                 for m in messages if m.get("role") in ("user","assistant") and m.get("content")]
+        if not clean:
+            return resp({"error": "Нет сообщений"}, 400)
+        answer = get_openai_response(clean, role)
+        return resp({"reply": answer})
 
     conn.close()
     return resp({"error":"Not found"}, 404)

@@ -6,6 +6,13 @@
       "path": "/?action=generate_invoice",
       "body": {"proposal_id": 1},
       "expectedStatus": 401
+    },
+    {
+      "name": "AI chat empty messages",
+      "method": "POST",
+      "path": "/?action=chat",
+      "body": {"messages": [], "role": "visitor"},
+      "expectedStatus": 400
     }
   ]
 }

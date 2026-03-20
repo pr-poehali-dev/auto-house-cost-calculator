@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -215,6 +216,8 @@ function DashboardShell({ user, token, onLogout, children }: {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
         {children}
       </main>
+
+      <ChatWidget role={user.role_code as ChatRole} userName={user.full_name} />
     </div>
   );
 }
