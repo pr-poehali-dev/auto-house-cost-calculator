@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +140,139 @@ const PROJECTS = [
   },
 ];
 
+// ─── Smeta Data ──────────────────────────────────────────────────────────────
+
+interface SmetaItem {
+  name: string;
+  unit: string;
+  qty: (area: number, floors: number) => number;
+  pricePerUnit: number;
+  category: string;
+}
+
+const SMETA_ITEMS: SmetaItem[] = [
+  // Земляные работы
+  { name: "Разработка грунта (экскаватор)", unit: "м³", qty: (a) => Math.round(a * 0.8), pricePerUnit: 850, category: "Земляные работы" },
+  { name: "Вывоз грунта", unit: "м³", qty: (a) => Math.round(a * 0.5), pricePerUnit: 600, category: "Земляные работы" },
+  { name: "Ручная доработка грунта", unit: "м³", qty: (a) => Math.round(a * 0.15), pricePerUnit: 1200, category: "Земляные работы" },
+  { name: "Планировка территории", unit: "м²", qty: (a) => Math.round(a * 1.5), pricePerUnit: 180, category: "Земляные работы" },
+
+  // Фундамент
+  { name: "Опалубка фундамента", unit: "м²", qty: (a) => Math.round(a * 0.6), pricePerUnit: 1800, category: "Фундамент" },
+  { name: "Арматура Ø12 AIII", unit: "т", qty: (a) => +(a * 0.012).toFixed(2), pricePerUnit: 75000, category: "Фундамент" },
+  { name: "Бетон М300 (B22.5)", unit: "м³", qty: (a) => Math.round(a * 0.25), pricePerUnit: 6500, category: "Фундамент" },
+  { name: "Гидроизоляция фундамента (рулонная)", unit: "м²", qty: (a) => Math.round(a * 0.7), pricePerUnit: 420, category: "Фундамент" },
+  { name: "Утеплитель ЭППС 100мм", unit: "м²", qty: (a) => Math.round(a * 0.5), pricePerUnit: 680, category: "Фундамент" },
+  { name: "Укладка бетонной подготовки", unit: "м²", qty: (a) => Math.round(a), pricePerUnit: 950, category: "Фундамент" },
+
+  // Стены и перекрытия
+  { name: "Кладка наружных стен (кирпич)", unit: "м³", qty: (a, fl) => Math.round(a * 0.18 * fl), pricePerUnit: 8500, category: "Стены и перекрытия" },
+  { name: "Кирпич рядовой М150", unit: "тыс.шт", qty: (a, fl) => +(a * 0.05 * fl).toFixed(1), pricePerUnit: 18000, category: "Стены и перекрытия" },
+  { name: "Раствор кладочный М75", unit: "м³", qty: (a, fl) => Math.round(a * 0.04 * fl), pricePerUnit: 5200, category: "Стены и перекрытия" },
+  { name: "Кладка внутренних перегородок", unit: "м²", qty: (a, fl) => Math.round(a * 0.8 * fl), pricePerUnit: 1800, category: "Стены и перекрытия" },
+  { name: "Монтаж перемычек оконных/дверных", unit: "шт", qty: (a, fl) => Math.round(a * 0.08 * fl), pricePerUnit: 2500, category: "Стены и перекрытия" },
+  { name: "Плиты перекрытия ПК", unit: "шт", qty: (a, fl) => Math.round(a / 12 * fl), pricePerUnit: 14000, category: "Стены и перекрытия" },
+  { name: "Монтаж плит перекрытия (кран)", unit: "шт", qty: (a, fl) => Math.round(a / 12 * fl), pricePerUnit: 2200, category: "Стены и перекрытия" },
+  { name: "Армопояс (бетон М300)", unit: "м³", qty: (a, fl) => +(a * 0.015 * fl).toFixed(2), pricePerUnit: 12000, category: "Стены и перекрытия" },
+
+  // Кровля
+  { name: "Стропильная система (брус 150×50)", unit: "м³", qty: (a) => +(a * 0.025).toFixed(2), pricePerUnit: 32000, category: "Кровля" },
+  { name: "Монтаж стропильной системы", unit: "м²", qty: (a) => Math.round(a * 1.15), pricePerUnit: 1400, category: "Кровля" },
+  { name: "Обрешётка (доска 25×100)", unit: "м²", qty: (a) => Math.round(a * 1.15), pricePerUnit: 380, category: "Кровля" },
+  { name: "Гидроизоляционная плёнка", unit: "м²", qty: (a) => Math.round(a * 1.2), pricePerUnit: 280, category: "Кровля" },
+  { name: "Металлочерепица (Монтеррей)", unit: "м²", qty: (a) => Math.round(a * 1.15), pricePerUnit: 850, category: "Кровля" },
+  { name: "Конёк, торцевые планки", unit: "пм", qty: (a) => Math.round(Math.sqrt(a) * 2.5), pricePerUnit: 650, category: "Кровля" },
+  { name: "Утеплитель кровли (минвата 200мм)", unit: "м²", qty: (a) => Math.round(a * 1.1), pricePerUnit: 520, category: "Кровля" },
+  { name: "Пароизоляция кровли", unit: "м²", qty: (a) => Math.round(a * 1.1), pricePerUnit: 180, category: "Кровля" },
+  { name: "Водосточная система", unit: "пм", qty: (a) => Math.round(Math.sqrt(a) * 4), pricePerUnit: 1200, category: "Кровля" },
+
+  // Окна и двери
+  { name: "Окна ПВХ 2-камерный стеклопакет", unit: "м²", qty: (a, fl) => Math.round(a * 0.12 * fl), pricePerUnit: 12500, category: "Окна и двери" },
+  { name: "Монтаж окон", unit: "шт", qty: (a, fl) => Math.round(a * 0.06 * fl), pricePerUnit: 3500, category: "Окна и двери" },
+  { name: "Откосы оконные (ПВХ)", unit: "пм", qty: (a, fl) => Math.round(a * 0.18 * fl), pricePerUnit: 850, category: "Окна и двери" },
+  { name: "Дверь входная (металл, утеплённая)", unit: "шт", qty: (_a, fl) => fl, pricePerUnit: 28000, category: "Окна и двери" },
+  { name: "Двери межкомнатные (ПВХ)", unit: "шт", qty: (a, fl) => Math.round(a * 0.04 * fl), pricePerUnit: 8500, category: "Окна и двери" },
+  { name: "Монтаж дверей межкомнатных", unit: "шт", qty: (a, fl) => Math.round(a * 0.04 * fl), pricePerUnit: 2800, category: "Окна и двери" },
+
+  // Утепление и фасад
+  { name: "Утеплитель фасадный (минвата 100мм)", unit: "м²", qty: (a, fl) => Math.round(a * 0.7 * fl), pricePerUnit: 680, category: "Утепление и фасад" },
+  { name: "Крепёж (дюбель-гриб)", unit: "шт", qty: (a, fl) => Math.round(a * 3.5 * fl), pricePerUnit: 18, category: "Утепление и фасад" },
+  { name: "Армирующая сетка фасадная", unit: "м²", qty: (a, fl) => Math.round(a * 0.7 * fl), pricePerUnit: 220, category: "Утепление и фасад" },
+  { name: "Штукатурка фасадная декоративная", unit: "м²", qty: (a, fl) => Math.round(a * 0.7 * fl), pricePerUnit: 950, category: "Утепление и фасад" },
+  { name: "Грунтовка фасадная", unit: "л", qty: (a, fl) => Math.round(a * 0.7 * fl * 0.3), pricePerUnit: 180, category: "Утепление и фасад" },
+  { name: "Краска фасадная", unit: "л", qty: (a, fl) => Math.round(a * 0.7 * fl * 0.5), pricePerUnit: 320, category: "Утепление и фасад" },
+
+  // Черновые полы
+  { name: "Стяжка цементно-песчаная 70мм", unit: "м²", qty: (a, fl) => Math.round(a * fl), pricePerUnit: 780, category: "Черновые полы" },
+  { name: "Цемент М400 (мешок 50кг)", unit: "мешок", qty: (a, fl) => Math.round(a * fl * 0.18), pricePerUnit: 420, category: "Черновые полы" },
+  { name: "Песок речной", unit: "т", qty: (a, fl) => +(a * fl * 0.12).toFixed(1), pricePerUnit: 1800, category: "Черновые полы" },
+  { name: "Гидроизоляция пола (полиэтилен 200мкм)", unit: "м²", qty: (a, fl) => Math.round(a * fl), pricePerUnit: 45, category: "Черновые полы" },
+  { name: "Утеплитель пола (ЭППС 50мм)", unit: "м²", qty: (a) => Math.round(a), pricePerUnit: 420, category: "Черновые полы" },
+
+  // Чистовые полы
+  { name: "Ламинат 33 класс (укладка)", unit: "м²", qty: (a, fl) => Math.round(a * fl * 0.7), pricePerUnit: 1200, category: "Чистовые полы" },
+  { name: "Ламинат 33 класс (материал)", unit: "м²", qty: (a, fl) => Math.round(a * fl * 0.72), pricePerUnit: 850, category: "Чистовые полы" },
+  { name: "Плитка керамогранит (санузлы, кухня)", unit: "м²", qty: (a, fl) => Math.round(a * fl * 0.2), pricePerUnit: 2800, category: "Чистовые полы" },
+  { name: "Клей для плитки", unit: "мешок", qty: (a, fl) => Math.round(a * fl * 0.2 * 0.08), pricePerUnit: 380, category: "Чистовые полы" },
+  { name: "Плинтус напольный МДФ", unit: "пм", qty: (a, fl) => Math.round(Math.sqrt(a) * 4 * fl), pricePerUnit: 280, category: "Чистовые полы" },
+
+  // Отделка стен и потолков
+  { name: "Шпатлёвка стартовая", unit: "кг", qty: (a, fl) => Math.round(a * fl * 2.5), pricePerUnit: 28, category: "Отделка стен и потолков" },
+  { name: "Шпатлёвка финишная", unit: "кг", qty: (a, fl) => Math.round(a * fl * 1.5), pricePerUnit: 42, category: "Отделка стен и потолков" },
+  { name: "Грунтовка глубокого проникновения", unit: "л", qty: (a, fl) => Math.round(a * fl * 0.4), pricePerUnit: 85, category: "Отделка стен и потолков" },
+  { name: "Краска интерьерная (потолок)", unit: "л", qty: (a, fl) => Math.round(a * fl * 0.25), pricePerUnit: 220, category: "Отделка стен и потолков" },
+  { name: "Обои флизелиновые", unit: "рул", qty: (a, fl) => Math.round(a * fl * 0.07), pricePerUnit: 1800, category: "Отделка стен и потолков" },
+  { name: "Клей для обоев", unit: "пач", qty: (a, fl) => Math.round(a * fl * 0.007), pricePerUnit: 320, category: "Отделка стен и потолков" },
+  { name: "Работы по штукатурке стен", unit: "м²", qty: (a, fl) => Math.round(a * fl * 2.8), pricePerUnit: 650, category: "Отделка стен и потолков" },
+  { name: "Работы по шпатлёвке стен", unit: "м²", qty: (a, fl) => Math.round(a * fl * 2.8), pricePerUnit: 480, category: "Отделка стен и потолков" },
+  { name: "Поклейка обоев", unit: "м²", qty: (a, fl) => Math.round(a * fl * 2.0), pricePerUnit: 320, category: "Отделка стен и потолков" },
+
+  // Электрика
+  { name: "Кабель ВВГнг 3×2.5 (освещение)", unit: "м", qty: (a, fl) => Math.round(a * fl * 1.8), pricePerUnit: 95, category: "Электрика" },
+  { name: "Кабель ВВГнг 3×4 (розетки)", unit: "м", qty: (a, fl) => Math.round(a * fl * 2.2), pricePerUnit: 145, category: "Электрика" },
+  { name: "Кабель ВВГнг 3×6 (силовые)", unit: "м", qty: (a, fl) => Math.round(a * fl * 0.5), pricePerUnit: 220, category: "Электрика" },
+  { name: "Щиток электрический на 24 модуля", unit: "шт", qty: (_a, fl) => fl, pricePerUnit: 4500, category: "Электрика" },
+  { name: "Автоматы защиты (16А, 25А)", unit: "шт", qty: (a, fl) => Math.round(a * fl * 0.08), pricePerUnit: 380, category: "Электрика" },
+  { name: "Розетки (двойные)", unit: "шт", qty: (a, fl) => Math.round(a * fl * 0.15), pricePerUnit: 620, category: "Электрика" },
+  { name: "Выключатели", unit: "шт", qty: (a, fl) => Math.round(a * fl * 0.06), pricePerUnit: 480, category: "Электрика" },
+  { name: "Монтаж электрики (разводка)", unit: "м²", qty: (a, fl) => Math.round(a * fl), pricePerUnit: 950, category: "Электрика" },
+
+  // Сантехника
+  { name: "Труба ПП 25мм (водоснабжение)", unit: "м", qty: (a, fl) => Math.round(a * fl * 0.3), pricePerUnit: 85, category: "Сантехника" },
+  { name: "Труба канализационная 110мм", unit: "м", qty: (a, fl) => Math.round(a * fl * 0.25), pricePerUnit: 320, category: "Сантехника" },
+  { name: "Унитаз с инсталляцией", unit: "шт", qty: (_a, fl) => fl, pricePerUnit: 18500, category: "Сантехника" },
+  { name: "Ванна акриловая 170×70", unit: "шт", qty: (_a, fl) => fl, pricePerUnit: 12000, category: "Сантехника" },
+  { name: "Смеситель для ванны/душа", unit: "шт", qty: (_a, fl) => fl, pricePerUnit: 4800, category: "Сантехника" },
+  { name: "Смеситель кухонный", unit: "шт", qty: () => 1, pricePerUnit: 3500, category: "Сантехника" },
+  { name: "Мойка кухонная нержавейка", unit: "шт", qty: () => 1, pricePerUnit: 4200, category: "Сантехника" },
+  { name: "Монтаж сантехники", unit: "м²", qty: (a, fl) => Math.round(a * fl), pricePerUnit: 680, category: "Сантехника" },
+];
+
+type SmetaGroupData = { category: string; items: (SmetaItem & { totalQty: number; totalPrice: number })[]; groupTotal: number };
+
+function buildSmeta(area: number, floors: number, finishingId: string): SmetaGroupData[] {
+  const noFinish = finishingId === "none";
+  const roughOnly = finishingId === "rough";
+  const finishCategories = ["Чистовые полы", "Отделка стен и потолков"];
+  const roughCategories = ["Черновые полы"];
+
+  const filtered = SMETA_ITEMS.filter(item => {
+    if (noFinish && [...finishCategories, ...roughCategories].includes(item.category)) return false;
+    if (roughOnly && finishCategories.includes(item.category)) return false;
+    return true;
+  });
+
+  const groups: Record<string, SmetaGroupData> = {};
+  for (const item of filtered) {
+    if (!groups[item.category]) groups[item.category] = { category: item.category, items: [], groupTotal: 0 };
+    const totalQty = item.qty(area, floors);
+    const totalPrice = Math.round(totalQty * item.pricePerUnit);
+    groups[item.category].items.push({ ...item, totalQty, totalPrice });
+    groups[item.category].groupTotal += totalPrice;
+  }
+  return Object.values(groups);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatPrice(n: number): string {
@@ -146,8 +281,13 @@ function formatPrice(n: number): string {
   return n.toFixed(0) + " ₽";
 }
 
+function formatNum(n: number): string {
+  return new Intl.NumberFormat("ru-RU").format(n);
+}
+
 const NAV_ITEMS = [
   { id: "calc", label: "Калькулятор", icon: "Calculator" },
+  { id: "smeta", label: "Смета", icon: "FileText" },
   { id: "projects", label: "Проекты", icon: "LayoutGrid" },
   { id: "compare", label: "Сравнение", icon: "GitCompare" },
 ];
@@ -200,6 +340,74 @@ export default function Index() {
   useEffect(() => {
     setAnimKey(k => k + 1);
   }, [area, floors, houseType, roofType, foundation, finishing, communications, additionals, region]);
+
+  // Smeta
+  const smetaGroups = buildSmeta(area, floors, finishing);
+  const smetaTotal = smetaGroups.reduce((s, g) => s + g.groupTotal, 0);
+
+  const downloadPDF = () => {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // Header
+    doc.setFillColor(10, 13, 20);
+    doc.rect(0, 0, 210, 297, "F");
+    doc.setFontSize(20);
+    doc.setTextColor(255, 107, 26);
+    doc.text("СМЕТА НА СТРОИТЕЛЬСТВО ДОМА", 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(180, 180, 180);
+    doc.text(`Дата: ${new Date().toLocaleDateString("ru-RU")}`, 14, 26);
+    doc.text(`Площадь: ${area} м²  |  Этажей: ${floors}  |  Тип: ${houseTypeData.label}  |  Отделка: ${finishingData.label}`, 14, 32);
+
+    let startY = 40;
+
+    for (const group of smetaGroups) {
+      // Group header
+      doc.setFillColor(30, 37, 53);
+      doc.rect(14, startY - 4, 182, 7, "F");
+      doc.setFontSize(9);
+      doc.setTextColor(255, 107, 26);
+      doc.text(group.category.toUpperCase(), 16, startY);
+      startY += 4;
+
+      autoTable(doc, {
+        startY,
+        head: [["Наименование", "Ед.", "Кол-во", "Цена/ед.", "Сумма, ₽"]],
+        body: group.items.map(item => [
+          item.name,
+          item.unit,
+          String(item.totalQty),
+          formatNum(item.pricePerUnit),
+          formatNum(item.totalPrice),
+        ]),
+        foot: [["", "", "", "Итого по разделу:", formatNum(group.groupTotal)]],
+        theme: "grid",
+        styles: { fontSize: 7.5, cellPadding: 2, textColor: [220, 220, 220], fillColor: [15, 19, 30], lineColor: [30, 37, 53] },
+        headStyles: { fillColor: [20, 26, 40], textColor: [0, 212, 255], fontStyle: "bold", fontSize: 7.5 },
+        footStyles: { fillColor: [20, 26, 40], textColor: [0, 255, 136], fontStyle: "bold", fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 80 },
+          1: { cellWidth: 15, halign: "center" },
+          2: { cellWidth: 20, halign: "right" },
+          3: { cellWidth: 32, halign: "right" },
+          4: { cellWidth: 32, halign: "right" },
+        },
+        margin: { left: 14, right: 14 },
+      });
+
+      startY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+    }
+
+    // Total
+    doc.setFontSize(13);
+    doc.setTextColor(255, 107, 26);
+    doc.text(`ИТОГО ПО СМЕТЕ: ${formatNum(smetaTotal)} руб.`, 14, startY + 6);
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text("* Смета носит ориентировочный характер. Цены могут отличаться в зависимости от региона и поставщиков.", 14, startY + 14);
+
+    doc.save(`smeta_${area}m2_${floors}fl.pdf`);
+  };
 
   return (
     <div className="noise-bg min-h-screen" style={{ background: "var(--dark-bg)" }}>
@@ -783,6 +991,87 @@ export default function Index() {
             )}
           </div>
         )}
+        {/* ── SMETA TAB ── */}
+        {activeTab === "smeta" && (
+          <div className="animate-fade-in">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--neon-green)" }}>
+                  Детализация
+                </div>
+                <h2 className="font-display text-3xl font-bold text-white">Смета строительства</h2>
+                <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  {area} м² · {floors} эт. · {houseTypeData.label} · Отделка: {finishingData.label}
+                </p>
+              </div>
+              <button
+                onClick={downloadPDF}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all hover:scale-105"
+                style={{
+                  background: "linear-gradient(135deg, var(--neon-green), #00cc66)",
+                  color: "#0A0D14",
+                  boxShadow: "0 0 25px rgba(0,255,136,0.35)",
+                }}>
+                <Icon name="Download" size={16} />
+                Скачать PDF
+              </button>
+            </div>
+
+            {/* Summary bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-7">
+              {[
+                { label: "Позиций в смете", val: String(smetaGroups.reduce((s, g) => s + g.items.length, 0)), color: "var(--neon-cyan)" },
+                { label: "Разделов", val: String(smetaGroups.length), color: "#A855F7" },
+                { label: "Итого по смете", val: formatPrice(smetaTotal), color: "var(--neon-green)" },
+                { label: "Цена / м²", val: formatPrice(Math.round(smetaTotal / area)), color: "var(--neon-orange)" },
+              ].map((s, i) => (
+                <div key={i} className="rounded-2xl p-4"
+                  style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+                  <div className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{s.label}</div>
+                  <div className="font-display font-bold text-xl" style={{ color: s.color }}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Groups */}
+            <div className="space-y-4">
+              {smetaGroups.map((group, gi) => (
+                <SmetaGroup key={gi} group={group} index={gi} />
+              ))}
+            </div>
+
+            {/* Total */}
+            <div className="mt-6 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+              style={{
+                background: "linear-gradient(135deg, #0d1a12, #111520)",
+                border: "1px solid rgba(0,255,136,0.3)",
+                boxShadow: "0 0 30px rgba(0,255,136,0.1)",
+              }}>
+              <div>
+                <div className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.45)" }}>ИТОГО ПО СМЕТЕ</div>
+                <div className="font-display font-black text-4xl" style={{ color: "var(--neon-green)" }}>
+                  {formatNum(smetaTotal)} ₽
+                </div>
+                <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  * Ориентировочные цены. Фактические могут отличаться в зависимости от региона и поставщиков.
+                </div>
+              </div>
+              <button
+                onClick={downloadPDF}
+                className="flex items-center gap-2 px-8 py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all hover:scale-105 whitespace-nowrap"
+                style={{
+                  background: "linear-gradient(135deg, var(--neon-green), #00cc66)",
+                  color: "#0A0D14",
+                  boxShadow: "0 0 25px rgba(0,255,136,0.4)",
+                }}>
+                <Icon name="FileDown" size={18} />
+                Скачать PDF-смету
+              </button>
+            </div>
+          </div>
+        )}
+
       </main>
 
       {/* Footer */}
@@ -790,6 +1079,85 @@ export default function Index() {
         style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)", fontSize: 12 }}>
         СтройКалькулятор · Автоматический расчёт стоимости строительства · 2026
       </footer>
+    </div>
+  );
+}
+
+// ─── SmetaGroup component ─────────────────────────────────────────────────────
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Земляные работы": "#A855F7",
+  "Фундамент": "#00D4FF",
+  "Стены и перекрытия": "#FF6B1A",
+  "Кровля": "#FBBF24",
+  "Окна и двери": "#00FF88",
+  "Утепление и фасад": "#EC4899",
+  "Черновые полы": "#6366F1",
+  "Чистовые полы": "#14B8A6",
+  "Отделка стен и потолков": "#F97316",
+  "Электрика": "#EAB308",
+  "Сантехника": "#3B82F6",
+};
+
+function SmetaGroup({ group, index }: { group: SmetaGroupData; index: number }) {
+  const [open, setOpen] = useState(index < 2);
+  const color = CATEGORY_COLORS[group.category] || "var(--neon-orange)";
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)", animation: `fadeInUp 0.4s ease-out ${index * 0.04}s both` }}>
+      {/* Group header — clickable */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between p-4 sm:p-5 transition-all hover:bg-white/5"
+        style={{ background: "rgba(255,255,255,0.03)" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+          <span className="font-display font-semibold text-sm sm:text-base text-white tracking-wide">{group.category}</span>
+          <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}>
+            {group.items.length} поз.
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="font-display font-bold text-base sm:text-lg" style={{ color }}>
+            {formatNum(group.groupTotal)} ₽
+          </span>
+          <Icon name={open ? "ChevronUp" : "ChevronDown"} size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
+        </div>
+      </button>
+
+      {/* Items table */}
+      {open && (
+        <div className="overflow-x-auto animate-fade-in">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Наименование</th>
+                <th className="text-center px-3 py-2.5 text-xs font-semibold w-16" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Ед.</th>
+                <th className="text-right px-3 py-2.5 text-xs font-semibold w-20" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Кол-во</th>
+                <th className="text-right px-3 py-2.5 text-xs font-semibold w-28" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Цена/ед., ₽</th>
+                <th className="text-right px-4 py-2.5 text-xs font-semibold w-32" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Сумма, ₽</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.items.map((item, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                  <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.8)" }}>{item.name}</td>
+                  <td className="px-3 py-2.5 text-center text-xs" style={{ color: "rgba(255,255,255,0.45)" }}>{item.unit}</td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: "rgba(255,255,255,0.7)" }}>{item.totalQty}</td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: "rgba(255,255,255,0.5)" }}>{formatNum(item.pricePerUnit)}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold" style={{ color }}>{formatNum(item.totalPrice)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: `${color}11`, borderTop: `1px solid ${color}33` }}>
+                <td colSpan={3} className="px-4 py-3 text-sm font-semibold" style={{ color: "rgba(255,255,255,0.5)" }}>Итого по разделу</td>
+                <td colSpan={2} className="px-4 py-3 text-right font-display font-bold text-base" style={{ color }}>{formatNum(group.groupTotal)} ₽</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
