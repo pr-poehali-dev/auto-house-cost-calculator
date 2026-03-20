@@ -574,8 +574,17 @@ interface PriceRow {
   category: string;
   article: string;
   note: string;
+  valid_from?: string;
   is_new_material?: boolean;
   _key: number;
+}
+
+interface PriceVersion {
+  id: number;
+  version_date: string;
+  file_name: string;
+  items_count: number;
+  created_at: string;
 }
 
 const UNITS = ["шт","м²","м³","м п.м.","кг","т","л","уп","компл","рул"];
@@ -592,6 +601,11 @@ function PriceListTab({ token }: { token: string }) {
   const [searchQ, setSearchQ] = useState<Record<number, string>>({});
   const [searchRes, setSearchRes] = useState<Record<number, {id:number;name:string;unit:string;category:string}[]>>({});
   const [loadingExisting, setLoadingExisting] = useState(true);
+  const [versions, setVersions] = useState<PriceVersion[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiveItems, setArchiveItems] = useState<PriceRow[]>([]);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [currentFileName, setCurrentFileName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const addRow = () => {
@@ -614,9 +628,23 @@ function PriceListTab({ token }: { token: string }) {
         setRows(loaded);
         setKeyGen(loaded.length + 1);
       }
+      if (res.versions?.length) setVersions(res.versions);
       setLoadingExisting(false);
     });
   }, [token]);
+
+  const loadArchiveVersion = async (versionId: number) => {
+    setArchiveLoading(true);
+    const res = await apiFetch(API + `?action=price_list_version_get&version_id=${versionId}`, {}, token);
+    setArchiveLoading(false);
+    if (res.items) setArchiveItems(res.items.map((it: PriceRow, i: number) => ({ ...it, _key: i + 1 })));
+  };
+
+  const formatDate = (d: string) => {
+    if (!d) return "—";
+    const date = new Date(d);
+    return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+  };
 
   // Поиск материала по названию
   const searchMaterial = async (k: number, q: string) => {
@@ -635,7 +663,7 @@ function PriceListTab({ token }: { token: string }) {
 
   // Загрузка Excel файла
   const handleFile = async (file: File) => {
-    setUploading(true); setUploadMsg("");
+    setUploading(true); setUploadMsg(""); setCurrentFileName(file.name);
     const reader = new FileReader();
     reader.onload = async (e) => {
       const b64 = (e.target?.result as string).split(",")[1];
@@ -708,24 +736,94 @@ function PriceListTab({ token }: { token: string }) {
       article: r.article,
       note: r.note,
     }));
-    const res = await apiFetch(API + "?action=price_list_save", { method: "POST", body: JSON.stringify({ items }) }, token);
+    const res = await apiFetch(API + "?action=price_list_save", { method: "POST", body: JSON.stringify({ items, file_name: currentFileName }) }, token);
     setSaving(false);
-    if (res.ok) setMsg(`✓ Сохранено ${res.saved} позиций. Лучшие цены обновлены в базе.`);
-    else setMsg(res.error || "Ошибка сохранения");
+    if (res.ok) {
+      setMsg(`✓ Сохранено ${res.saved} позиций. Лучшие цены обновлены в базе.`);
+      // Обновить список версий
+      apiFetch(API + "?action=price_list_get", {}, token).then(r => { if (r.versions) setVersions(r.versions); });
+    } else {
+      setMsg(res.error || "Ошибка сохранения");
+    }
   };
 
   const inp = "w-full px-2 py-1.5 rounded-lg text-xs text-white outline-none";
   const inpSt = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" };
 
+  const priceDate = rows.length > 0 ? rows.find(r => r.valid_from)?.valid_from : null;
+
   return (
     <div>
-      <div className="mb-6">
-        <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-cyan)" }}>Прайс-лист</div>
-        <h2 className="font-display text-2xl font-bold text-white">Мой прайс-лист</h2>
-        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-          Загрузите файл Excel/PDF или добавьте позиции вручную. Лучшие цены автоматически попадут в базу.
-        </p>
+      <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-cyan)" }}>Прайс-лист</div>
+          <h2 className="font-display text-2xl font-bold text-white">Мой прайс-лист</h2>
+          <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+            Загрузите файл Excel/PDF или добавьте позиции вручную. Лучшие цены автоматически попадут в базу.
+          </p>
+        </div>
+        {priceDate && (
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "rgba(0,255,136,0.08)", border: "1px solid rgba(0,255,136,0.2)" }}>
+              <Icon name="CalendarCheck" size={14} style={{ color: "var(--neon-green)" }} />
+              <span className="text-xs font-semibold" style={{ color: "var(--neon-green)" }}>
+                Цены актуальны на {formatDate(priceDate)}
+              </span>
+            </div>
+            {versions.length > 0 && (
+              <button onClick={() => { setShowArchive(v => !v); if (!showArchive && archiveItems.length === 0) loadArchiveVersion(versions[0].id); }}
+                className="flex items-center gap-1.5 text-xs transition-all hover:opacity-80"
+                style={{ color: "rgba(255,255,255,0.35)" }}>
+                <Icon name="History" size={12} />
+                История ({versions.length} версий)
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Архив версий */}
+      {showArchive && versions.length > 0 && (
+        <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>История версий прайса</div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {versions.map(v => (
+              <button key={v.id} onClick={() => loadArchiveVersion(v.id)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105"
+                style={{ background: archiveItems[0]?.valid_from === v.version_date ? "rgba(0,212,255,0.2)" : "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <span>{formatDate(v.version_date)}</span>
+                <span className="ml-1.5 opacity-50">{v.items_count} поз.</span>
+                {v.file_name && <span className="ml-1.5 opacity-40">· {v.file_name.split("/").pop()}</span>}
+              </button>
+            ))}
+          </div>
+          {archiveLoading ? (
+            <div className="text-xs py-4 text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
+          ) : archiveItems.length > 0 && (
+            <div className="overflow-x-auto max-h-64 overflow-y-auto rounded-xl" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                    {["Наименование","Ед.","Цена, ₽","Категория"].map((h, i) => (
+                      <th key={i} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.3)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {archiveItems.map((r, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td className="px-3 py-1.5 text-white">{r.material_name}</td>
+                      <td className="px-3 py-1.5" style={{ color: "rgba(255,255,255,0.5)" }}>{r.unit}</td>
+                      <td className="px-3 py-1.5 font-mono" style={{ color: "var(--neon-cyan)" }}>{Number(r.price_per_unit).toLocaleString("ru-RU")}</td>
+                      <td className="px-3 py-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>{r.category}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Загрузка файла */}
       <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.2)" }}>

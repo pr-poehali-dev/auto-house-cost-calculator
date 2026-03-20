@@ -426,21 +426,56 @@ def handler(event, context):
                 WHERE pl.supplier_id=%s
                 ORDER BY pl.updated_at DESC
             """, (supplier["id"],))
-            rows = cur.fetchall(); cur.close(); conn.close()
-            return resp({"items":[{
-                "id":r[0],"material_id":r[1],"material_name":r[2],"unit":r[3],
-                "price_per_unit":float(r[4]),"category":r[5],"article":r[6] or "",
-                "note":r[7] or "","valid_from":str(r[8]),"is_new_material":r[9]
-            } for r in rows]})
+            rows = cur.fetchall()
+            cur2 = conn.cursor()
+            cur2.execute(f"""
+                SELECT id, version_date, file_name, items_count, created_at
+                FROM {S}.price_list_versions
+                WHERE supplier_id=%s
+                ORDER BY version_date DESC, created_at DESC
+                LIMIT 20
+            """, (supplier["id"],))
+            versions = cur2.fetchall()
+            cur.close(); cur2.close(); conn.close()
+            return resp({
+                "items":[{
+                    "id":r[0],"material_id":r[1],"material_name":r[2],"unit":r[3],
+                    "price_per_unit":float(r[4]),"category":r[5],"article":r[6] or "",
+                    "note":r[7] or "","valid_from":str(r[8]),"is_new_material":r[9]
+                } for r in rows],
+                "versions":[{
+                    "id":v[0],"version_date":str(v[1]),"file_name":v[2] or "",
+                    "items_count":v[3],"created_at":str(v[4])
+                } for v in versions]
+            })
 
         # Сохранить/обновить прайс позиций
         if action == "price_list_save":
             items = body.get("items",[])
+            file_name = body.get("file_name","")
             if not items: conn.close(); return resp({"error":"items обязательны"}, 400)
             cur = conn.cursor()
+            # Архивируем текущий прайс перед обновлением
+            cur.execute(f"""
+                SELECT id, material_name, unit, price_per_unit, category, article, note, valid_from
+                FROM {S}.supplier_price_list WHERE supplier_id=%s
+            """, (supplier["id"],))
+            existing = cur.fetchall()
+            if existing:
+                cur.execute(f"""
+                    INSERT INTO {S}.price_list_versions (supplier_id, version_date, file_name, items_count)
+                    VALUES (%s, CURRENT_DATE, %s, %s) RETURNING id
+                """, (supplier["id"], file_name, len(existing)))
+                version_id = cur.fetchone()[0]
+                for ex in existing:
+                    cur.execute(f"""
+                        INSERT INTO {S}.price_list_archive
+                            (version_id, supplier_id, material_name, unit, price_per_unit, category, article, note, valid_from)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """, (version_id, supplier["id"], ex[1], ex[2], ex[3], ex[4], ex[5] or "", ex[6] or "", ex[7]))
             saved = 0
             for item in items:
-                row_id = item.get("id")          # id существующей строки (если редактируем)
+                row_id = item.get("id")
                 mid = item.get("material_id")
                 name = item.get("material_name","").strip()
                 unit = item.get("unit","шт")
@@ -451,7 +486,6 @@ def handler(event, context):
                 if not name or price <= 0: continue
 
                 if row_id:
-                    # Обновляем существующую запись по id
                     cur.execute(f"""
                         UPDATE {S}.supplier_price_list
                         SET material_name=%s, unit=%s, price_per_unit=%s, category=%s,
@@ -468,13 +502,11 @@ def handler(event, context):
                             material_name=EXCLUDED.material_name, valid_from=CURRENT_DATE, updated_at=NOW()
                     """, (supplier["id"],mid,name,unit,price,cat,article,note))
                 else:
-                    # Новый материал — просто вставляем
                     cur.execute(f"""
                         INSERT INTO {S}.supplier_price_list (supplier_id,material_id,material_name,unit,price_per_unit,category,article,note,valid_from,is_new_material)
                         VALUES (%s,NULL,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE)
                     """, (supplier["id"],name,unit,price,cat,article,note))
                 saved += 1
-                # Обновляем best_price в materials если это лучшая цена
                 if mid:
                     cur.execute(f"""
                         UPDATE {S}.materials SET best_price=%s, best_price_supplier_id=%s, best_price_updated_at=NOW()
@@ -482,6 +514,24 @@ def handler(event, context):
                     """, (price, supplier["id"], mid, price))
             conn.commit(); cur.close(); conn.close()
             return resp({"ok":True,"saved":saved})
+
+        # Получить архивную версию прайса
+        if action == "price_list_version_get":
+            version_id = int(qs.get("version_id",0))
+            if not version_id: conn.close(); return resp({"error":"version_id обязателен"}, 400)
+            cur = conn.cursor()
+            cur.execute(f"""
+                SELECT a.material_name, a.unit, a.price_per_unit, a.category, a.article, a.note, a.valid_from
+                FROM {S}.price_list_archive a
+                JOIN {S}.price_list_versions v ON v.id=a.version_id
+                WHERE a.version_id=%s AND v.supplier_id=%s
+                ORDER BY a.category, a.material_name
+            """, (version_id, supplier["id"]))
+            rows = cur.fetchall(); cur.close(); conn.close()
+            return resp({"items":[{
+                "material_name":r[0],"unit":r[1],"price_per_unit":float(r[2]),
+                "category":r[3],"article":r[4] or "","note":r[5] or "","valid_from":str(r[6])
+            } for r in rows]})
 
         # Загрузка файла КП (base64) в S3 + парсинг Excel
         if action == "upload_kp_file":
