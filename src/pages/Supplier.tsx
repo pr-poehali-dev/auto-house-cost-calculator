@@ -129,9 +129,12 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: SupplierUser) =>
               </div>
             </>
           )}
+          {error && mode === "register" && (
+            <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>
+          )}
           <div>
             <label className={label} style={labelStyle}>Email</label>
-            <input type="email" className={inp} style={inpStyle} placeholder="company@mail.ru" value={form.email} onChange={e => set("email", e.target.value)} required />
+            <input type="email" className={inp} style={{ ...inpStyle, ...(error && error.toLowerCase().includes("email") ? { border: "1px solid #ef4444" } : {}) }} placeholder="company@mail.ru" value={form.email} onChange={e => { set("email", e.target.value); setError(""); }} required />
           </div>
           <div>
             <label className={label} style={labelStyle}>Пароль</label>
