@@ -2,7 +2,7 @@
 API управления проектами: проекты, файлы (S3), ведомости объёмов работ (BOQ)
 Роутинг через ?action=...
 """
-import json, os, base64, mimetypes
+import json, os, base64, mimetypes, re, urllib.request
 import psycopg2
 import boto3
 
@@ -365,10 +365,124 @@ def handler(event: dict, context) -> dict:
         pid = body.get("project_id")
         tc_id = body.get("tech_card_id")
         if not pid or not tc_id: conn.close(); return resp({"error":"project_id и tech_card_id обязательны"}, 400)
-        # Сохраняем как файл-ссылку в change_log
         log(conn, staff["id"], "house_projects", pid, "attach_tech_card", str(tc_id))
         conn.commit(); conn.close()
         return resp({"ok":True})
+
+    # ── Загрузка и парсинг файла технологической карты (PDF / Excel) ──────────
+    if action == "tech_card_upload":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        file_b64 = body.get("file_base64","")
+        file_name = body.get("file_name","file.pdf")
+        if not file_b64: conn.close(); return resp({"error":"file_base64 обязателен"}, 400)
+
+        file_bytes = base64.b64decode(file_b64)
+        ext = file_name.rsplit(".",1)[-1].lower() if "." in file_name else "pdf"
+
+        # Сохраняем файл в S3
+        s3 = boto3.client("s3", endpoint_url="https://bucket.poehali.dev",
+                          aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                          aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+        import secrets as sec
+        s3key = f"tech_cards/{sec.token_hex(8)}.{ext}"
+        ctype = "application/pdf" if ext == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        s3.put_object(Bucket="files", Key=s3key, Body=file_bytes, ContentType=ctype)
+        file_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{s3key}"
+
+        # Извлекаем текст для AI
+        text_content = ""
+        if ext == "pdf":
+            # Для PDF — пробуем опциональный pdfplumber, fallback — передаём имя файла
+            try:
+                import pdfplumber, io
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    pages_text = []
+                    for page in pdf.pages[:10]:
+                        t = page.extract_text()
+                        if t: pages_text.append(t)
+                    text_content = "\n".join(pages_text)[:6000]
+            except Exception:
+                text_content = f"Файл: {file_name}"
+        elif ext in ("xlsx","xls","csv"):
+            try:
+                import openpyxl, io
+                wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+                rows_text = []
+                for sheet in wb.worksheets[:3]:
+                    for row in sheet.iter_rows(max_row=200, values_only=True):
+                        vals = [str(v) for v in row if v is not None and str(v).strip()]
+                        if vals: rows_text.append(" | ".join(vals))
+                text_content = "\n".join(rows_text[:300])[:6000]
+            except Exception:
+                text_content = f"Файл: {file_name}"
+
+        # Если текст не извлечён — используем имя файла как подсказку
+        if not text_content.strip():
+            text_content = f"Файл технологической карты: {file_name}"
+
+        # GPT: парсим структуру техкарты
+        api_key = os.environ.get("OPENAI_API_KEY","")
+        parsed = {"title": file_name.rsplit(".",1)[0], "category": "Прочее", "description": "", "content": []}
+
+        if api_key:
+            prompt = f"""Ты — эксперт по строительным технологическим картам. Проанализируй содержимое файла и извлеки структурированную информацию.
+
+Содержимое файла:
+{text_content}
+
+Верни ТОЛЬКО JSON (без пояснений):
+{{
+  "title": "Название технологической карты",
+  "category": "Одна из: Фундамент | Стены | Кровля | Полы | Окна и двери | Отделка | Инженерия | Земляные работы | Прочее",
+  "description": "Краткое описание (1-2 предложения)",
+  "content": [
+    {{"step": 1, "name": "Название операции", "desc": "Подробное описание", "duration": "X дней/часов"}},
+    ...
+  ]
+}}
+
+Если в файле менее 3 шагов — придумай логичные шаги на основе названия карты."""
+
+            try:
+                data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
+                                   "temperature":0.2,"max_tokens":2000}, ensure_ascii=False).encode()
+                req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+                    headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    result = json.loads(r.read())
+                content_str = result["choices"][0]["message"]["content"].strip()
+                match = re.search(r'\{.*\}', content_str, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group())
+                    if not isinstance(parsed.get("content"), list):
+                        parsed["content"] = []
+            except Exception:
+                pass
+
+        # Сохраняем в БД
+        cur = conn.cursor()
+        cur.execute(f"""
+            INSERT INTO {S}.tech_cards (title, category, description, content, created_by)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """, (parsed.get("title", file_name), parsed.get("category","Прочее"),
+              parsed.get("description",""), json.dumps(parsed.get("content",[]), ensure_ascii=False),
+              staff["id"]))
+        new_id = cur.fetchone()[0]
+        conn.commit(); cur.close(); conn.close()
+
+        return resp({"ok": True, "id": new_id, "title": parsed.get("title",""),
+                     "category": parsed.get("category",""), "description": parsed.get("description",""),
+                     "steps_count": len(parsed.get("content",[])), "file_url": file_url})
+
+    # ── Удаление технологической карты ────────────────────────────────────────
+    if action == "tech_card_delete":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        tc_id = body.get("id")
+        if not tc_id: conn.close(); return resp({"error":"id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {S}.tech_cards SET is_active=FALSE WHERE id=%s AND created_by=%s", (tc_id, staff["id"]))
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
 
     conn.close()
     return resp({"error":"Not found"}, 404)

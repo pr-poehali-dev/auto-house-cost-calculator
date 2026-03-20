@@ -111,11 +111,16 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
   const [loading, setLoading] = useState(true);
   const [openCard, setOpenCard] = useState<number | null>(null);
   const [attached, setAttached] = useState<Set<number>>(new Set());
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const loadCards = () => {
     apiFetch(`${PROJECTS_URL}?action=tech_cards`, {}, token)
       .then(r => { setCards(r.tech_cards || []); setLoading(false); });
-  }, [token]);
+  };
+
+  useEffect(() => { loadCards(); }, [token]);
 
   const attach = async (cardId: number) => {
     await apiFetch(`${PROJECTS_URL}?action=tech_card_attach`, {
@@ -125,34 +130,85 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
     setAttached(prev => new Set([...prev, cardId]));
   };
 
+  const handleUpload = (file: File) => {
+    setUploading(true); setUploadMsg("");
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const b64 = (e.target?.result as string).split(",")[1];
+      const res = await apiFetch(`${PROJECTS_URL}?action=tech_card_upload`, {
+        method: "POST",
+        body: JSON.stringify({ file_base64: b64, file_name: file.name }),
+      }, token);
+      setUploading(false);
+      if (res.ok) {
+        setUploadMsg(`✓ Добавлена карта «${res.title}» (${res.steps_count} шагов)`);
+        setLoading(true);
+        loadCards();
+      } else {
+        setUploadMsg(res.error || "Ошибка загрузки файла");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const categories = [...new Set(cards.map(c => c.category))];
   const catColors: Record<string, string> = {
     "Фундамент": "#00D4FF", "Стены": "#FF6B1A", "Кровля": "#A855F7",
     "Полы": "#FBBF24", "Окна и двери": "#00FF88", "Отделка": "#EC4899",
+    "Инженерия": "#06B6D4", "Земляные работы": "#84CC16", "Прочее": "#9CA3AF",
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }}>
-      <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl overflow-hidden"
+      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
         style={{ background: "var(--dark-bg)", border: "1px solid rgba(168,85,247,0.3)" }}>
+
+        {/* Шапка */}
         <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "#A855F7" }}>Библиотека</div>
             <h3 className="font-display font-bold text-xl text-white">Технологические карты</h3>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10" style={{ color: "rgba(255,255,255,0.5)" }}>
-            <Icon name="X" size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls" className="hidden"
+              onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+              style={{ background: "rgba(168,85,247,0.15)", color: "#a78bfa", border: "1px solid rgba(168,85,247,0.3)" }}>
+              <Icon name={uploading ? "Loader" : "Upload"} size={14} />
+              {uploading ? "Обработка..." : "Загрузить PDF / Excel"}
+            </button>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10" style={{ color: "rgba(255,255,255,0.5)" }}>
+              <Icon name="X" size={16} />
+            </button>
+          </div>
         </div>
 
+        {/* Статус загрузки */}
+        {uploadMsg && (
+          <div className="mx-5 mt-4 px-4 py-2.5 rounded-xl text-sm flex items-center gap-2"
+            style={{ background: uploadMsg.startsWith("✓") ? "rgba(0,255,136,0.08)" : "rgba(239,68,68,0.08)", color: uploadMsg.startsWith("✓") ? "var(--neon-green)" : "#ef4444", border: `1px solid ${uploadMsg.startsWith("✓") ? "rgba(0,255,136,0.2)" : "rgba(239,68,68,0.2)"}` }}>
+            <Icon name={uploadMsg.startsWith("✓") ? "CheckCircle" : "AlertCircle"} size={14} />
+            {uploadMsg}
+          </div>
+        )}
+
+        {/* Список карт */}
         <div className="overflow-y-auto flex-1 p-5 space-y-6">
           {loading ? (
             <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
+          ) : cards.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="text-5xl mb-3">📋</div>
+              <div className="text-sm mb-2 text-white">Библиотека пуста</div>
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Загрузите PDF или Excel с технологической картой</div>
+            </div>
           ) : categories.map(cat => (
             <div key={cat}>
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ background: catColors[cat] || "#fff" }} />
+                <div className="w-2.5 h-2.5 rounded-full" style={{ background: catColors[cat] || "#9CA3AF" }} />
                 <span className="text-sm font-semibold text-white">{cat}</span>
+                <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>({cards.filter(c => c.category === cat).length})</span>
               </div>
               <div className="space-y-2">
                 {cards.filter(c => c.category === cat).map(card => (
@@ -160,11 +216,18 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
                     <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-white/5"
                       onClick={() => setOpenCard(openCard === card.id ? null : card.id)}
                       style={{ background: "rgba(255,255,255,0.03)" }}>
-                      <div>
-                        <div className="text-sm font-medium text-white">{card.title}</div>
-                        <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>{card.description}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white truncate">{card.title}</div>
+                        <div className="text-xs mt-0.5 flex items-center gap-2" style={{ color: "rgba(255,255,255,0.35)" }}>
+                          <span>{card.description}</span>
+                          {card.content?.length > 0 && (
+                            <span className="px-1.5 py-0.5 rounded" style={{ background: "rgba(168,85,247,0.12)", color: "#a78bfa", fontSize: "10px" }}>
+                              {card.content.length} шагов
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-4">
+                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
                         <button
                           onClick={e => { e.stopPropagation(); attach(card.id); }}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
@@ -173,22 +236,22 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
                             color: attached.has(card.id) ? "var(--neon-green)" : "#A855F7",
                             border: `1px solid ${attached.has(card.id) ? "rgba(0,255,136,0.3)" : "rgba(168,85,247,0.3)"}`,
                           }}>
-                          {attached.has(card.id) ? "Добавлено ✓" : "Добавить"}
+                          {attached.has(card.id) ? "Добавлено ✓" : "В проект"}
                         </button>
                         <Icon name={openCard === card.id ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
                       </div>
                     </div>
 
-                    {openCard === card.id && (
-                      <div className="px-4 py-3 space-y-2" style={{ background: "rgba(168,85,247,0.04)" }}>
+                    {openCard === card.id && card.content?.length > 0 && (
+                      <div className="px-4 py-3 space-y-3" style={{ background: "rgba(168,85,247,0.04)" }}>
                         {card.content.map((step) => (
                           <div key={step.step} className="flex gap-3">
-                            <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                            <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5"
                               style={{ background: "rgba(168,85,247,0.2)", color: "#A855F7" }}>{step.step}</div>
-                            <div>
+                            <div className="flex-1">
                               <div className="text-sm font-medium text-white">{step.name}</div>
-                              <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{step.desc}</div>
-                              <div className="text-xs mt-0.5" style={{ color: "#A855F7" }}>⏱ {step.duration}</div>
+                              {step.desc && <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{step.desc}</div>}
+                              {step.duration && <div className="text-xs mt-0.5 flex items-center gap-1" style={{ color: "#A855F7" }}><Icon name="Clock" size={10} /> {step.duration}</div>}
                             </div>
                           </div>
                         ))}
@@ -199,6 +262,11 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Подсказка */}
+        <div className="px-5 py-3 border-t text-xs" style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)" }}>
+          Поддерживаются форматы: PDF, Excel (.xlsx, .xls) · AI автоматически извлекает структуру карты
         </div>
       </div>
     </div>
