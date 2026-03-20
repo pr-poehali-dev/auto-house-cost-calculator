@@ -6,6 +6,7 @@ import json, os, base64, re
 import psycopg2
 import boto3
 import urllib.request
+import urllib.parse
 import urllib.error
 
 S = "t_p78845984_auto_house_cost_calc"
@@ -87,23 +88,43 @@ def call_openai_text(text: str, materials_context: str) -> list:
     }, api_key)
     return _parse_items(result["choices"][0]["message"]["content"].strip())
 
+def ocr_images_to_text(images_b64: list) -> str:
+    """OCR через OCR.space — распознаёт текст из base64 JPEG изображений"""
+    ocr_key = os.environ.get("OCR_SPACE_API_KEY", "")
+    if not ocr_key or not images_b64:
+        return ""
+    texts = []
+    for b64 in images_b64[:6]:
+        try:
+            payload = urllib.parse.urlencode({
+                "base64Image": f"data:image/jpeg;base64,{b64}",
+                "language": "rus",
+                "isOverlayRequired": "false",
+                "OCREngine": "2",
+                "scale": "true",
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.ocr.space/parse/image",
+                data=payload,
+                headers={"apikey": ocr_key, "Content-Type": "application/x-www-form-urlencoded"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=60) as r:
+                result = json.loads(r.read())
+            parsed = result.get("ParsedResults", [])
+            if parsed:
+                texts.append(parsed[0].get("ParsedText", ""))
+        except Exception as e:
+            print(f"[spec-ai] OCR error: {e}")
+    return "\n".join(texts)
+
 def call_openai_vision(images_b64: list, materials_context: str) -> list:
-    """OCR сканированного PDF через DeepSeek Vision — передаём страницы как изображения"""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
+    """OCR сканированного PDF: сначала OCR.space → потом DeepSeek анализирует текст"""
+    ocr_text = ocr_images_to_text(images_b64)
+    print(f"[spec-ai] OCR extracted {len(ocr_text)} chars")
+    if not ocr_text.strip():
         return []
-
-    content = [{"type": "text", "text": f"{SPEC_PROMPT}\n\nБаза материалов:\n{materials_context}\n\nИзвлеки позиции из изображений ниже:"}]
-    for b64 in images_b64[:6]:  # не более 6 страниц
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "high"}})
-
-    result = _openai_request({
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0.1,
-        "max_tokens": 4000,
-    }, api_key)
-    return _parse_items(result["choices"][0]["message"]["content"].strip())
+    return call_openai_text(ocr_text, materials_context)
 
 def extract_text_from_pdf(file_data: bytes) -> str:
     """Извлекает встроенный текст из PDF (работает только для текстовых PDF, не сканов)"""
@@ -279,10 +300,15 @@ def handler(event: dict, context) -> dict:
                 error_msg = str(e)
                 print(f"[spec-ai] DeepSeek error: {e}")
         elif images_b64:
-            # Скан PDF — DeepSeek не поддерживает Vision, пробуем извлечь текст иначе
+            # Скан PDF — OCR.space распознаёт текст, затем DeepSeek анализирует
             mode = "ocr"
-            print(f"[spec-ai] mode=ocr, {len(images_b64)} images — DeepSeek Vision не поддерживается")
-            error_msg = "Файл является сканом (изображением). Загрузите PDF с текстовым слоем или Excel-файл."
+            print(f"[spec-ai] mode=ocr, {len(images_b64)} images, sending to OCR.space")
+            try:
+                ai_items = call_openai_vision(images_b64, mat_ctx)
+                print(f"[spec-ai] OCR+DeepSeek returned {len(ai_items)} items")
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[spec-ai] OCR error: {e}")
         else:
             error_msg = "Не удалось извлечь данные из файла. Убедитесь что файл не повреждён."
 
