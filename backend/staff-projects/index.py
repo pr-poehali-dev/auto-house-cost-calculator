@@ -164,29 +164,43 @@ def handler(event: dict, context) -> dict:
     if action == "upload_file":
         if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)
         pid = body.get("project_id")
-        file_data = body.get("file_data","")  # base64
-        file_name = body.get("file_name","file.jpg")
-        file_type = body.get("file_type","render")  # render|plan|facade|section|other
-        if not pid or not file_data: conn.close(); return resp({"error":"project_id и file_data обязательны"}, 400)
+        file_name = body.get("file_name","file.pdf")
+        file_type = body.get("file_type","render")
+        if not pid or not file_name: conn.close(); return resp({"error":"project_id и file_name обязательны"}, 400)
 
-        ext = file_name.rsplit(".",1)[-1].lower() if "." in file_name else "jpg"
-        ct = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-        key = f"projects/{pid}/{file_type}/{file_name}"
+        import re
+        safe_name = re.sub(r"[^\w.\-]", "_", file_name)
+        ct = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        key = f"projects/{pid}/{file_type}/{safe_name}"
         try:
             s3 = s3_client()
-            s3.put_object(Bucket="files", Key=key, Body=base64.b64decode(file_data), ContentType=ct)
+            presigned = s3.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": "files", "Key": key, "ContentType": ct},
+                ExpiresIn=600
+            )
             url = cdn_url(key)
         except Exception as e:
             conn.close(); return resp({"error":f"S3 ошибка: {str(e)}"}, 500)
 
+        conn.close()
+        return resp({"ok":True,"presigned_url":presigned,"cdn_url":url,"key":key,"content_type":ct})
+
+    if action == "confirm_upload":
+        if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)
+        pid = body.get("project_id")
+        file_name = body.get("file_name")
+        file_type = body.get("file_type","render")
+        cdn = body.get("cdn_url")
+        if not pid or not file_name or not cdn: conn.close(); return resp({"error":"Не хватает полей"}, 400)
         cur = conn.cursor()
         cur.execute(f"SELECT COALESCE(MAX(sort_order),0)+1 FROM {S}.project_files WHERE project_id=%s AND file_type=%s", (pid, file_type))
         sort = cur.fetchone()[0]
         cur.execute(f"INSERT INTO {S}.project_files (project_id,file_type,file_url,file_name,sort_order,uploaded_by) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-                    (pid, file_type, url, file_name, sort, staff["id"]))
+                    (pid, file_type, cdn, file_name, sort, staff["id"]))
         fid = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
-        return resp({"ok":True,"id":fid,"url":url})
+        return resp({"ok":True,"id":fid,"url":cdn})
 
     if action == "delete_file":
         if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)

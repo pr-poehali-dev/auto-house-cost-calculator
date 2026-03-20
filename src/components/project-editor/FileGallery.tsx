@@ -17,17 +17,31 @@ export default function FileGallery({ project, token, canEdit }: { project: Proj
 
   const uploadFile = async (file: File, ftype: string) => {
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const b64 = (e.target?.result as string).split(",")[1];
+    try {
+      // Шаг 1: получаем presigned URL от бэкенда
       const res = await authFetch(`${PROJECTS_URL}?action=upload_file`, {
         method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_data: b64, file_name: file.name, file_type: ftype }),
+        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: ftype }),
       }, token);
+      if (!res.presigned_url) { setUploading(false); return; }
+
+      // Шаг 2: загружаем файл напрямую в S3 (без лимита размера)
+      await fetch(res.presigned_url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": res.content_type },
+      });
+
+      // Шаг 3: подтверждаем запись в БД
+      await authFetch(`${PROJECTS_URL}?action=confirm_upload`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: ftype, cdn_url: res.cdn_url }),
+      }, token);
+
+      load();
+    } finally {
       setUploading(false);
-      if (res.ok) load();
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const deleteFile = async (fid: number) => {

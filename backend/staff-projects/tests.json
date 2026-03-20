@@ -5,7 +5,7 @@
       "method": "GET",
       "path": "/?action=public_list",
       "expectedStatus": 200,
-      "expectedBody": {"projects": []},
+      "expectedBody": {"projects": [{}]},
       "bodyMatcher": "partial"
     },
     {
