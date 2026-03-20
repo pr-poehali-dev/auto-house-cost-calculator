@@ -408,7 +408,6 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
       await fetch(r.presigned_url, {
         method: "PUT",
         body: file,
-        headers: { "Content-Type": r.content_type },
       });
 
       const r2 = await apiFetch(`${PROJECTS_URL}?action=confirm_upload`, {

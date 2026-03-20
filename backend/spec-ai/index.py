@@ -219,7 +219,7 @@ def handler(event: dict, context) -> dict:
         s3c = s3()
         presigned = s3c.generate_presigned_url(
             "put_object",
-            Params={"Bucket":"files","Key":key,"ContentType":ct},
+            Params={"Bucket":"files","Key":key},
             ExpiresIn=600
         )
         conn.close()

@@ -121,7 +121,6 @@ function SpecUploader({ token, projectId, specId, onImport }: {
       await fetch(pre.presigned_url, {
         method: "PUT",
         body: file,
-        headers: { "Content-Type": pre.content_type },
       });
 
       // Шаг 3: запускаем AI-разбор по s3_key

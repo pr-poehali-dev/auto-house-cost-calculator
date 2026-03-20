@@ -29,7 +29,6 @@ export default function FileGallery({ project, token, canEdit }: { project: Proj
       await fetch(res.presigned_url, {
         method: "PUT",
         body: file,
-        headers: { "Content-Type": res.content_type },
       });
 
       // Шаг 3: подтверждаем запись в БД
