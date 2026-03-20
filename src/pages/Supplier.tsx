@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import ChatWidget from "@/components/ChatWidget";
@@ -564,13 +564,290 @@ function SupplierPriceOffer({ token, user }: { token: string; user: SupplierUser
   );
 }
 
+// ─── PriceListTab ─────────────────────────────────────────────────────────────
+interface PriceRow {
+  id?: number;
+  material_id?: number | null;
+  material_name: string;
+  unit: string;
+  price_per_unit: number | string;
+  category: string;
+  article: string;
+  note: string;
+  is_new_material?: boolean;
+  _key: number;
+}
+
+const UNITS = ["шт","м²","м³","м п.м.","кг","т","л","уп","компл","рул"];
+const CATS = ["Стройматериалы","Отделочные материалы","Кровля","Фундамент","Металлопрокат","Дерево и пиломатериалы","Инженерия","Электрика","Сантехника","Мебель и отделка","Прочее"];
+
+function PriceListTab({ token }: { token: string }) {
+  const [rows, setRows] = useState<PriceRow[]>([]);
+  const [keyGen, setKeyGen] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [searchQ, setSearchQ] = useState<Record<number, string>>({});
+  const [searchRes, setSearchRes] = useState<Record<number, {id:number;name:string;unit:string;category:string}[]>>({});
+  const [loadingExisting, setLoadingExisting] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const addRow = () => {
+    const k = keyGen + 1;
+    setKeyGen(k);
+    setRows(prev => [...prev, { material_name:"", unit:"шт", price_per_unit:"", category:"Прочее", article:"", note:"", _key: k }]);
+  };
+
+  const removeRow = (k: number) => setRows(prev => prev.filter(r => r._key !== k));
+
+  const updateRow = (k: number, field: keyof PriceRow, value: unknown) => {
+    setRows(prev => prev.map(r => r._key === k ? { ...r, [field]: value } : r));
+  };
+
+  // Загрузить сохранённый прайс
+  useEffect(() => {
+    apiFetch(API + "?action=price_list_get", {}, token).then(res => {
+      if (res.items?.length) {
+        const loaded: PriceRow[] = res.items.map((it: PriceRow & { _key?: number }, i: number) => ({ ...it, _key: i + 1 }));
+        setRows(loaded);
+        setKeyGen(loaded.length + 1);
+      }
+      setLoadingExisting(false);
+    });
+  }, [token]);
+
+  // Поиск материала по названию
+  const searchMaterial = async (k: number, q: string) => {
+    setSearchQ(prev => ({ ...prev, [k]: q }));
+    updateRow(k, "material_name", q);
+    if (q.length < 2) { setSearchRes(prev => ({ ...prev, [k]: [] })); return; }
+    const res = await apiFetch(API + "?action=materials_search", { method: "POST", body: JSON.stringify({ q }) }, token);
+    setSearchRes(prev => ({ ...prev, [k]: res.materials || [] }));
+  };
+
+  const pickMaterial = (k: number, mat: {id:number;name:string;unit:string;category:string}) => {
+    setRows(prev => prev.map(r => r._key === k ? { ...r, material_id: mat.id, material_name: mat.name, unit: mat.unit, category: mat.category, is_new_material: false } : r));
+    setSearchRes(prev => ({ ...prev, [k]: [] }));
+    setSearchQ(prev => ({ ...prev, [k]: "" }));
+  };
+
+  // Загрузка Excel файла
+  const handleFile = async (file: File) => {
+    setUploading(true); setUploadMsg("");
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const b64 = (e.target?.result as string).split(",")[1];
+      const res = await apiFetch(API + "?action=upload_kp_file", {
+        method: "POST",
+        body: JSON.stringify({ file_base64: b64, file_name: file.name }),
+      }, token);
+      setUploading(false);
+      if (res.parsed_items?.length) {
+        const baseKey = keyGen + 1;
+        const newRows: PriceRow[] = res.parsed_items.map((it: { name: string; unit: string; price_per_unit: number; qty?: number }, i: number) => ({
+          material_name: it.name,
+          unit: it.unit || "шт",
+          price_per_unit: it.price_per_unit || "",
+          category: "Прочее",
+          article: "",
+          note: "",
+          is_new_material: true,
+          _key: baseKey + i,
+        }));
+        setRows(prev => [...prev, ...newRows]);
+        setKeyGen(baseKey + newRows.length);
+        setUploadMsg(`✓ Распознано ${newRows.length} позиций из файла. Проверьте и сохраните.`);
+      } else {
+        setUploadMsg(res.error || "Файл загружен, но позиции не распознаны автоматически. Добавьте вручную.");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Сохранить прайс
+  const savePriceList = async () => {
+    const valid = rows.filter(r => r.material_name.trim() && parseFloat(String(r.price_per_unit)) > 0);
+    if (!valid.length) { setMsg("Нет позиций с ценой"); return; }
+    setSaving(true); setMsg("");
+    const items = valid.map(r => ({
+      material_id: r.material_id || null,
+      material_name: r.material_name,
+      unit: r.unit,
+      price_per_unit: parseFloat(String(r.price_per_unit)),
+      category: r.category,
+      article: r.article,
+      note: r.note,
+    }));
+    const res = await apiFetch(API + "?action=price_list_save", { method: "POST", body: JSON.stringify({ items }) }, token);
+    setSaving(false);
+    if (res.ok) setMsg(`✓ Сохранено ${res.saved} позиций. Лучшие цены обновлены в базе.`);
+    else setMsg(res.error || "Ошибка сохранения");
+  };
+
+  const inp = "w-full px-2 py-1.5 rounded-lg text-xs text-white outline-none";
+  const inpSt = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" };
+
+  return (
+    <div>
+      <div className="mb-6">
+        <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-cyan)" }}>Прайс-лист</div>
+        <h2 className="font-display text-2xl font-bold text-white">Мой прайс-лист</h2>
+        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+          Загрузите файл Excel/PDF или добавьте позиции вручную. Лучшие цены автоматически попадут в базу.
+        </p>
+      </div>
+
+      {/* Загрузка файла */}
+      <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.2)" }}>
+        <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Загрузить из файла</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden"
+            onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+            style={{ background: "rgba(0,212,255,0.15)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.3)" }}>
+            <Icon name={uploading ? "Loader" : "Upload"} size={15} />
+            {uploading ? "Обработка файла..." : "Загрузить Excel / PDF"}
+          </button>
+          <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+            Формат: колонки «Наименование», «Ед.», «Кол-во», «Цена»
+          </div>
+        </div>
+        {uploadMsg && (
+          <div className="mt-3 text-sm px-3 py-2 rounded-lg"
+            style={{ background: uploadMsg.startsWith("✓") ? "rgba(0,255,136,0.08)" : "rgba(251,191,36,0.08)", color: uploadMsg.startsWith("✓") ? "var(--neon-green)" : "#FBBF24" }}>
+            {uploadMsg}
+          </div>
+        )}
+      </div>
+
+      {/* Таблица позиций */}
+      <div className="rounded-2xl overflow-hidden mb-4" style={{ border: "1px solid var(--card-border)" }}>
+        <div className="px-4 py-3 flex items-center justify-between" style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.35)" }}>
+            Позиции прайс-листа ({rows.length})
+          </span>
+          <button onClick={addRow}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+            style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+            <Icon name="Plus" size={13} /> Добавить строку
+          </button>
+        </div>
+
+        {loadingExisting ? (
+          <div className="text-center py-10 text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
+        ) : rows.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-4xl mb-2">📋</div>
+            <div className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузите файл или добавьте позиции вручную</div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                  {["Наименование","Ед.","Цена, ₽","Категория","Артикул","Примечание",""].map((h, i) => (
+                    <th key={i} className="px-3 py-2.5 text-left font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={row._key} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: idx % 2 ? "rgba(255,255,255,0.012)" : "transparent" }}>
+                    {/* Наименование с поиском */}
+                    <td className="px-3 py-2 min-w-48 relative">
+                      <input className={inp} style={{ ...inpSt, ...(row.material_id ? { borderColor: "rgba(0,255,136,0.3)" } : {}) }}
+                        placeholder="Название материала"
+                        value={searchQ[row._key] !== undefined ? searchQ[row._key] : row.material_name}
+                        onChange={e => searchMaterial(row._key, e.target.value)} />
+                      {row.material_id && (
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--neon-green)" }}>✓</span>
+                      )}
+                      {(searchRes[row._key]?.length || 0) > 0 && (
+                        <div className="absolute z-20 left-3 top-full mt-1 rounded-xl overflow-hidden shadow-xl" style={{ background: "#1a1f2e", border: "1px solid rgba(0,212,255,0.2)", minWidth: 240 }}>
+                          {searchRes[row._key].map(m => (
+                            <button key={m.id} type="button" onClick={() => pickMaterial(row._key, m)}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-white/10 transition-colors">
+                              <span className="text-white font-medium">{m.name}</span>
+                              <span className="ml-2 opacity-50">{m.unit} · {m.category}</span>
+                            </button>
+                          ))}
+                          <button type="button" onClick={() => { setSearchRes(prev => ({ ...prev, [row._key]: [] })); updateRow(row._key, "material_name", searchQ[row._key] || ""); setSearchQ(prev => ({ ...prev, [row._key]: "" })); }}
+                            className="w-full text-left px-3 py-2 text-xs border-t transition-colors hover:bg-white/10"
+                            style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--neon-orange)" }}>
+                            + Добавить как новый материал
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 w-20">
+                      <select className={inp} style={inpSt} value={row.unit} onChange={e => updateRow(row._key, "unit", e.target.value)}>
+                        {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 w-28">
+                      <input type="number" className={inp} style={{ ...inpSt, ...(parseFloat(String(row.price_per_unit)) > 0 ? { borderColor: "rgba(0,212,255,0.3)" } : {}) }}
+                        placeholder="0" value={row.price_per_unit}
+                        onChange={e => updateRow(row._key, "price_per_unit", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 w-36">
+                      <select className={inp} style={inpSt} value={row.category} onChange={e => updateRow(row._key, "category", e.target.value)}>
+                        {CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 w-24">
+                      <input className={inp} style={inpSt} placeholder="—" value={row.article}
+                        onChange={e => updateRow(row._key, "article", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 w-36">
+                      <input className={inp} style={inpSt} placeholder="Примечание" value={row.note}
+                        onChange={e => updateRow(row._key, "note", e.target.value)} />
+                    </td>
+                    <td className="px-2 py-2">
+                      <button onClick={() => removeRow(row._key)} className="p-1 rounded-lg transition-all hover:bg-red-500/20" style={{ color: "rgba(255,255,255,0.2)" }}>
+                        <Icon name="X" size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {msg && (
+        <div className="mb-4 px-4 py-3 rounded-xl text-sm"
+          style={{ background: msg.startsWith("✓") ? "rgba(0,255,136,0.08)" : "rgba(239,68,68,0.1)", color: msg.startsWith("✓") ? "var(--neon-green)" : "#ef4444", border: `1px solid ${msg.startsWith("✓") ? "rgba(0,255,136,0.2)" : "rgba(239,68,68,0.2)"}` }}>
+          {msg}
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button onClick={addRow}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+          style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <Icon name="Plus" size={15} /> Добавить строку
+        </button>
+        <button onClick={savePriceList} disabled={saving || rows.length === 0}
+          className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50"
+          style={{ background: "linear-gradient(135deg, var(--neon-cyan), #0099cc)", color: "#000", boxShadow: "0 0 20px rgba(0,212,255,0.25)" }}>
+          <Icon name={saving ? "Loader" : "Save"} size={15} />
+          {saving ? "Сохранение..." : `Сохранить прайс (${rows.filter(r => parseFloat(String(r.price_per_unit)) > 0).length} позиций)`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupplierPortal() {
   const [searchParams] = useSearchParams();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<SupplierUser | null>(null);
   const [checking, setChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rfqs" | "proposals" | "prices">("rfqs");
+  const [activeTab, setActiveTab] = useState<"rfqs" | "proposals" | "pricelist" | "prices">("rfqs");
 
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY);
@@ -623,8 +900,8 @@ export default function SupplierPortal() {
           </div>
           <div className="flex items-center gap-2">
             <nav className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.05)" }}>
-              {[{id:"rfqs",label:"Запросы КП",icon:"FileText"},{id:"proposals",label:"Мои КП",icon:"Send"},{id:"prices",label:"Предложить цены",icon:"Tag"}].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id as "rfqs"|"proposals"|"prices")}
+              {[{id:"rfqs",label:"Запросы КП",icon:"FileText"},{id:"proposals",label:"Мои КП",icon:"Send"},{id:"pricelist",label:"Мой прайс",icon:"Table2"},{id:"prices",label:"Цены в базе",icon:"Tag"}].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id as "rfqs"|"proposals"|"pricelist"|"prices")}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                   style={{ background: activeTab === tab.id ? "var(--neon-cyan)" : "transparent", color: activeTab === tab.id ? "#000" : "rgba(255,255,255,0.5)" }}>
                   <Icon name={tab.icon} size={13} /><span className="hidden sm:inline">{tab.label}</span>
@@ -641,6 +918,7 @@ export default function SupplierPortal() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {activeTab === "rfqs" && <RfqList token={token} />}
         {activeTab === "proposals" && <MyProposals token={token} />}
+        {activeTab === "pricelist" && <PriceListTab token={token} />}
         {activeTab === "prices" && <SupplierPriceOffer token={token} user={user} />}
       </main>
 

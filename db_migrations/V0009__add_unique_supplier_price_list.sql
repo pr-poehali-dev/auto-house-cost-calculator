@@ -1,0 +1,2 @@
+ALTER TABLE t_p78845984_auto_house_cost_calc.supplier_price_list
+ADD CONSTRAINT supplier_price_list_supplier_material_uq UNIQUE (supplier_id, material_id);

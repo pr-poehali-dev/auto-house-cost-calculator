@@ -12,6 +12,19 @@
       "method": "GET",
       "path": "/?action=rfq_list",
       "expectedStatus": 404
+    },
+    {
+      "name": "Materials search no token",
+      "method": "POST",
+      "path": "/?action=materials_search",
+      "body": {"q": "кирпич"},
+      "expectedStatus": 404
+    },
+    {
+      "name": "Price list get no token",
+      "method": "GET",
+      "path": "/?action=price_list_get",
+      "expectedStatus": 404
     }
   ]
 }

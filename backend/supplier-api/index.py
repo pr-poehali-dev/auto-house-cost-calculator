@@ -1,12 +1,14 @@
 """
 supplier-api: регистрация/авторизация поставщиков + управление запросами КП (RFQ)
 Роутинг через querystring: ?action=register|login|me|profile_update|rfq_list|rfq_get|rfq_create|rfq_award|rfq_close|notify
+|upload_kp_file|price_list_save|price_list_get|materials_search
 """
-import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse
+import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse, base64, io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import psycopg2
+import boto3
 
 S = "t_p78845984_auto_house_cost_calc"
 CORS = {
@@ -316,6 +318,136 @@ def handler(event, context):
             """, (supplier["id"],))
             rows = cur.fetchall(); cur.close(); conn.close()
             return resp({"proposals":[{"id":r[0],"rfq_id":r[1],"rfq_title":r[2],"address":r[3],"total_amount":float(r[4]),"delivery_days":r[5],"status":r[6],"submitted_at":str(r[7])} for r in rows]})
+
+    # ══ SUPPLIER: загрузка файла КП, прайс-лист, материалы ══════
+
+    if action in ("upload_kp_file","price_list_save","price_list_get","materials_search","price_list_submit") and sup_token:
+        supplier = get_supplier(conn, sup_token)
+        if not supplier: conn.close(); return resp({"error":"Сессия истекла"}, 401)
+
+        # Поиск материалов по названию
+        if action == "materials_search":
+            q = body.get("q","").strip()
+            cur = conn.cursor()
+            if q:
+                cur.execute(f"SELECT id,name,unit,category,price_per_unit FROM {S}.materials WHERE is_active=TRUE AND name ILIKE %s ORDER BY name LIMIT 20", (f"%{q}%",))
+            else:
+                cur.execute(f"SELECT id,name,unit,category,price_per_unit FROM {S}.materials WHERE is_active=TRUE ORDER BY name LIMIT 50")
+            rows = cur.fetchall(); cur.close(); conn.close()
+            return resp({"materials":[{"id":r[0],"name":r[1],"unit":r[2],"category":r[3],"price":float(r[4])} for r in rows]})
+
+        # Получить текущий прайс поставщика
+        if action == "price_list_get":
+            cur = conn.cursor()
+            cur.execute(f"""
+                SELECT pl.id, pl.material_id, pl.material_name, pl.unit, pl.price_per_unit,
+                       pl.category, pl.article, pl.note, pl.valid_from, pl.is_new_material
+                FROM {S}.supplier_price_list pl
+                WHERE pl.supplier_id=%s
+                ORDER BY pl.updated_at DESC
+            """, (supplier["id"],))
+            rows = cur.fetchall(); cur.close(); conn.close()
+            return resp({"items":[{
+                "id":r[0],"material_id":r[1],"material_name":r[2],"unit":r[3],
+                "price_per_unit":float(r[4]),"category":r[5],"article":r[6] or "",
+                "note":r[7] or "","valid_from":str(r[8]),"is_new_material":r[9]
+            } for r in rows]})
+
+        # Сохранить/обновить прайс позиций
+        if action == "price_list_save":
+            items = body.get("items",[])
+            if not items: conn.close(); return resp({"error":"items обязательны"}, 400)
+            cur = conn.cursor()
+            saved = 0
+            for item in items:
+                mid = item.get("material_id")
+                name = item.get("material_name","").strip()
+                unit = item.get("unit","шт")
+                price = float(item.get("price_per_unit",0))
+                cat = item.get("category","Прочее")
+                article = item.get("article","")
+                note = item.get("note","")
+                is_new = not mid
+                if not name or price <= 0: continue
+                if mid:
+                    cur.execute(f"""
+                        INSERT INTO {S}.supplier_price_list (supplier_id,material_id,material_name,unit,price_per_unit,category,article,note,valid_from,is_new_material)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,FALSE)
+                        ON CONFLICT (supplier_id,material_id) DO UPDATE
+                        SET price_per_unit=EXCLUDED.price_per_unit, note=EXCLUDED.note, valid_from=CURRENT_DATE, updated_at=NOW()
+                    """, (supplier["id"],mid,name,unit,price,cat,article,note))
+                else:
+                    cur.execute(f"""
+                        INSERT INTO {S}.supplier_price_list (supplier_id,material_id,material_name,unit,price_per_unit,category,article,note,valid_from,is_new_material)
+                        VALUES (%s,NULL,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE)
+                    """, (supplier["id"],name,unit,price,cat,article,note))
+                saved += 1
+                # Обновляем best_price в materials если это лучшая цена
+                if mid:
+                    cur.execute(f"""
+                        UPDATE {S}.materials SET best_price=%s, best_price_supplier_id=%s, best_price_updated_at=NOW()
+                        WHERE id=%s AND (best_price IS NULL OR best_price > %s)
+                    """, (price, supplier["id"], mid, price))
+            conn.commit(); cur.close(); conn.close()
+            return resp({"ok":True,"saved":saved})
+
+        # Загрузка файла КП (base64) в S3 + парсинг Excel
+        if action == "upload_kp_file":
+            file_b64 = body.get("file_base64","")
+            file_name = body.get("file_name","kp.xlsx")
+            rfq_id = body.get("rfq_id")
+            if not file_b64: conn.close(); return resp({"error":"file_base64 обязателен"}, 400)
+            file_bytes = base64.b64decode(file_b64)
+            ext = file_name.rsplit(".",1)[-1].lower() if "." in file_name else "xlsx"
+            s3key = f"kp/{supplier['id']}/{secrets.token_hex(8)}.{ext}"
+            s3c = boto3.client("s3", endpoint_url="https://bucket.poehali.dev",
+                               aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                               aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+            ctype = "application/pdf" if ext == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            s3c.put_object(Bucket="files", Key=s3key, Body=file_bytes, ContentType=ctype)
+            cdn_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{s3key}"
+
+            # Парсинг Excel
+            parsed_items = []
+            if ext in ("xlsx","xls","csv"):
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+                    ws = wb.active
+                    rows_data = list(ws.iter_rows(values_only=True))
+                    # Ищем строки с данными: ищем колонки name/unit/qty/price
+                    header_row = None
+                    col_map = {}
+                    for i, row in enumerate(rows_data[:10]):
+                        row_str = [str(c).lower().strip() if c else "" for c in row]
+                        for j, cell in enumerate(row_str):
+                            if any(k in cell for k in ["наимен","назван","материал","товар","name"]): col_map["name"] = j
+                            elif any(k in cell for k in ["ед","unit","единиц"]): col_map["unit"] = j
+                            elif any(k in cell for k in ["кол","qty","количест"]): col_map["qty"] = j
+                            elif any(k in cell for k in ["цена","price","стоим","руб"]): col_map["price"] = j
+                        if "name" in col_map: header_row = i; break
+                    if header_row is not None:
+                        for row in rows_data[header_row+1:]:
+                            try:
+                                name = str(row[col_map["name"]]).strip() if col_map.get("name") is not None and row[col_map["name"]] else ""
+                                unit = str(row[col_map["unit"]]).strip() if col_map.get("unit") is not None and row[col_map["unit"]] else "шт"
+                                qty_raw = row[col_map["qty"]] if col_map.get("qty") is not None else None
+                                price_raw = row[col_map["price"]] if col_map.get("price") is not None else None
+                                qty = float(qty_raw) if qty_raw is not None else 1
+                                price = float(str(price_raw).replace(" ","").replace(",",".")) if price_raw else 0
+                                if name and name not in ("None","nan","") and price > 0:
+                                    parsed_items.append({"name":name,"unit":unit,"qty":qty,"price_per_unit":price,"total":qty*price})
+                            except: continue
+                except Exception as e:
+                    parsed_items = []
+
+            cur = conn.cursor()
+            cur.execute(f"""
+                INSERT INTO {S}.proposal_files (supplier_id,rfq_id,file_name,file_url,file_type,parsed_items,status)
+                VALUES (%s,%s,%s,%s,%s,%s,'uploaded') RETURNING id
+            """, (supplier["id"], rfq_id, file_name, cdn_url, ext, json.dumps(parsed_items,ensure_ascii=False)))
+            fid = cur.fetchone()[0]; conn.commit(); cur.close(); conn.close()
+            return resp({"ok":True,"file_id":fid,"file_url":cdn_url,"parsed_items":parsed_items,"parsed_count":len(parsed_items)})
 
     conn.close()
     return resp({"error":"Not found"}, 404)
