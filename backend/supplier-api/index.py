@@ -404,6 +404,7 @@ def handler(event, context):
             cur = conn.cursor()
             saved = 0
             for item in items:
+                row_id = item.get("id")          # id существующей строки (если редактируем)
                 mid = item.get("material_id")
                 name = item.get("material_name","").strip()
                 unit = item.get("unit","шт")
@@ -411,16 +412,27 @@ def handler(event, context):
                 cat = item.get("category","Прочее")
                 article = item.get("article","")
                 note = item.get("note","")
-                is_new = not mid
                 if not name or price <= 0: continue
-                if mid:
+
+                if row_id:
+                    # Обновляем существующую запись по id
+                    cur.execute(f"""
+                        UPDATE {S}.supplier_price_list
+                        SET material_name=%s, unit=%s, price_per_unit=%s, category=%s,
+                            article=%s, note=%s, valid_from=CURRENT_DATE, updated_at=NOW()
+                        WHERE id=%s AND supplier_id=%s
+                    """, (name, unit, price, cat, article, note, row_id, supplier["id"]))
+                elif mid:
                     cur.execute(f"""
                         INSERT INTO {S}.supplier_price_list (supplier_id,material_id,material_name,unit,price_per_unit,category,article,note,valid_from,is_new_material)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,FALSE)
                         ON CONFLICT (supplier_id,material_id) DO UPDATE
-                        SET price_per_unit=EXCLUDED.price_per_unit, note=EXCLUDED.note, valid_from=CURRENT_DATE, updated_at=NOW()
+                        SET price_per_unit=EXCLUDED.price_per_unit, category=EXCLUDED.category,
+                            unit=EXCLUDED.unit, note=EXCLUDED.note, article=EXCLUDED.article,
+                            material_name=EXCLUDED.material_name, valid_from=CURRENT_DATE, updated_at=NOW()
                     """, (supplier["id"],mid,name,unit,price,cat,article,note))
                 else:
+                    # Новый материал — просто вставляем
                     cur.execute(f"""
                         INSERT INTO {S}.supplier_price_list (supplier_id,material_id,material_name,unit,price_per_unit,category,article,note,valid_from,is_new_material)
                         VALUES (%s,NULL,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE)

@@ -699,6 +699,7 @@ function PriceListTab({ token }: { token: string }) {
     if (!valid.length) { setMsg("Нет позиций с ценой"); return; }
     setSaving(true); setMsg("");
     const items = valid.map(r => ({
+      id: r.id || null,
       material_id: r.material_id || null,
       material_name: r.material_name,
       unit: r.unit,
