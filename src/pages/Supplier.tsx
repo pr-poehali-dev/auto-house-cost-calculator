@@ -17,7 +17,7 @@ const CATEGORIES = [
 interface SupplierUser { id: number; company_name: string; contact_name: string; email: string; phone: string; categories: string; region: string; is_verified: boolean; }
 interface RFQ { id: number; title: string; construction_address: string; area: number; floors: number; house_type: string; items: RFQItem[]; deadline: string | null; status: string; my_proposal?: Proposal; }
 interface RFQItem { name: string; unit: string; qty: number; category: string; }
-interface Proposal { id: number; rfq_id?: number; rfq_title?: string; address?: string; total_amount: number; delivery_days: number; status: string; submitted_at?: string; items?: ProposalItem[]; comment?: string; }
+interface Proposal { id: number; rfq_id?: number; rfq_title?: string; address?: string; total_amount: number; delivery_days: number; status: string; submitted_at?: string; items?: ProposalItem[]; comment?: string; delivery_conditions?: string; delivery_city?: string; delivery_street?: string; delivery_building?: string; }
 interface ProposalItem { name: string; unit: string; qty: number; price_per_unit: number; total: number; }
 interface Invoice { id: number; invoice_number: string; amount: number; status: string; created_at: string; rfq_title: string; address: string; }
 
@@ -186,7 +186,7 @@ function RfqList({ token }: { token: string }) {
       (res.rfq.items || []).forEach((item: RFQItem, i: number) => {
         items[i] = { name: item.name, unit: item.unit, qty: item.qty, price_per_unit: 0, total: 0 };
       });
-      setProposalForm({ ...items, comment: "", delivery_days: 14 });
+      setProposalForm({ ...items, comment: "", delivery_days: 14, delivery_conditions: "", delivery_city: "", delivery_street: "", delivery_building: "" });
     }
   };
 
@@ -203,7 +203,15 @@ function RfqList({ token }: { token: string }) {
     const items = Object.keys(proposalForm).filter(k => !isNaN(+k)).map(k => proposalForm[+k] as ProposalItem);
     const res = await apiFetch(API + "?action=proposal_submit", {
       method: "POST",
-      body: JSON.stringify({ rfq_id: selected.id, items, comment: proposalForm.comment, delivery_days: proposalForm.delivery_days }),
+      body: JSON.stringify({
+        rfq_id: selected.id, items,
+        comment: proposalForm.comment,
+        delivery_days: proposalForm.delivery_days,
+        delivery_conditions: proposalForm.delivery_conditions,
+        delivery_city: proposalForm.delivery_city,
+        delivery_street: proposalForm.delivery_street,
+        delivery_building: proposalForm.delivery_building,
+      }),
     }, token);
     setSubmitting(false);
     if (res.ok) { setMsg("Предложение отправлено!"); setSelected(null); load(); }
@@ -278,22 +286,61 @@ function RfqList({ token }: { token: string }) {
                 </tbody>
               </table>
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Срок поставки (дней)</label>
-                <input type="number" value={proposalForm.delivery_days || ""}
-                  onChange={e => setProposalForm(p => ({ ...p, delivery_days: +e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            {/* Условия поставки */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Условия поставки</div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Срок поставки (дней) *</label>
+                  <input type="number" value={proposalForm.delivery_days || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, delivery_days: +e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Условия (самовывоз / доставка)</label>
+                  <input type="text" value={proposalForm.delivery_conditions || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, delivery_conditions: e.target.value }))}
+                    placeholder="напр. Доставка включена / Самовывоз"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Комментарий</label>
-                <input type="text" value={proposalForm.comment || ""}
-                  onChange={e => setProposalForm(p => ({ ...p, comment: e.target.value }))}
-                  placeholder="Условия, гарантии..."
-                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+              <div className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: "rgba(255,255,255,0.35)" }}>Адрес доставки</div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Город</label>
+                  <input type="text" value={proposalForm.delivery_city || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, delivery_city: e.target.value }))}
+                    placeholder="Москва"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Улица</label>
+                  <input type="text" value={proposalForm.delivery_street || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, delivery_street: e.target.value }))}
+                    placeholder="ул. Строителей"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Дом / офис</label>
+                  <input type="text" value={proposalForm.delivery_building || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, delivery_building: e.target.value }))}
+                    placeholder="12, стр. 1"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
               </div>
+            </div>
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Комментарий / гарантии</label>
+              <input type="text" value={proposalForm.comment || ""}
+                onChange={e => setProposalForm(p => ({ ...p, comment: e.target.value }))}
+                placeholder="Условия оплаты, гарантии, особые условия..."
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
             </div>
             {msg && <div className="mb-3 text-sm" style={{ color: msg.includes("отправлено") ? "var(--neon-green)" : "#ef4444" }}>{msg}</div>}
             <button onClick={submitProposal} disabled={submitting || totalSum === 0}

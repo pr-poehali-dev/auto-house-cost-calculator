@@ -377,15 +377,28 @@ def handler(event, context):
             items = body.get("items",[])
             if not rfq_id or not items: conn.close(); return resp({"error":"rfq_id и items обязательны"}, 400)
             total = sum(float(i.get("total",0)) for i in items)
+            delivery_conditions = body.get("delivery_conditions","")
+            delivery_city = body.get("delivery_city","")
+            delivery_street = body.get("delivery_street","")
+            delivery_building = body.get("delivery_building","")
             cur = conn.cursor()
             cur.execute(f"""
-                INSERT INTO {S}.proposals (rfq_id,supplier_id,items,total_amount,delivery_days,comment)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                INSERT INTO {S}.proposals
+                    (rfq_id,supplier_id,items,total_amount,delivery_days,comment,
+                     delivery_conditions,delivery_city,delivery_street,delivery_building)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (rfq_id,supplier_id) DO UPDATE
                 SET items=EXCLUDED.items,total_amount=EXCLUDED.total_amount,
-                    delivery_days=EXCLUDED.delivery_days,comment=EXCLUDED.comment,submitted_at=NOW()
+                    delivery_days=EXCLUDED.delivery_days,comment=EXCLUDED.comment,
+                    delivery_conditions=EXCLUDED.delivery_conditions,
+                    delivery_city=EXCLUDED.delivery_city,
+                    delivery_street=EXCLUDED.delivery_street,
+                    delivery_building=EXCLUDED.delivery_building,
+                    submitted_at=NOW()
                 RETURNING id
-            """, (rfq_id,supplier["id"],json.dumps(items,ensure_ascii=False),total,body.get("delivery_days"),body.get("comment","")))
+            """, (rfq_id,supplier["id"],json.dumps(items,ensure_ascii=False),total,
+                  body.get("delivery_days"),body.get("comment",""),
+                  delivery_conditions,delivery_city,delivery_street,delivery_building))
             pid = cur.fetchone()[0]; conn.commit(); cur.close(); conn.close()
             return resp({"ok":True,"id":pid})
 
