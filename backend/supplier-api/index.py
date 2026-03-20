@@ -150,6 +150,20 @@ def handler(event, context):
 
     # ══ SUPPLIER AUTH ══════════════════════════════════════════
 
+    # admin_reset_password (внутренний — только с staff токеном)
+    if action == "admin_reset_password":
+        st = get_staff(conn, staff_token)
+        if not st: conn.close(); return resp({"error":"Нет доступа"}, 403)
+        email = body.get("email","")
+        new_pw = body.get("password","")
+        if not email or not new_pw: conn.close(); return resp({"error":"email и password обязательны"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {S}.suppliers SET password_hash=%s WHERE email=%s RETURNING id", (hp(new_pw), email))
+        r = cur.fetchone()
+        conn.commit(); cur.close(); conn.close()
+        if not r: return resp({"error":"Поставщик не найден"}, 404)
+        return resp({"ok": True})
+
     # register
     if action == "register" or body.get("action") == "register":
         for f in ["company_name","contact_name","email","password","categories"]:
