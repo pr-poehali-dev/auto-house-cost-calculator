@@ -4,6 +4,7 @@ import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
 import ProjectPanel from "@/components/ProjectEditor";
 import ArchitectCabinetNew from "./staff/ArchitectCabinet";
 import MaterialsDB from "./staff/MaterialsDB";
+import TechCardsDB from "./staff/TechCardsDB";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -224,8 +225,9 @@ function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) =>
 }
 
 // ─── Dashboard shell ───────────────────────────────────────────────────────────
-function DashboardShell({ user, token, onLogout, children }: {
-  user: StaffUser; token: string; onLogout: () => void; children: React.ReactNode
+function DashboardShell({ user, token, onLogout, children, globalTab, onGlobalTab }: {
+  user: StaffUser; token: string; onLogout: () => void; children: React.ReactNode;
+  globalTab: string; onGlobalTab: (t: "main"|"ttk") => void;
 }) {
   const color = ROLE_COLORS[user.role_code] || "#fff";
   const icon = ROLE_ICONS[user.role_code] || "User";
@@ -253,17 +255,29 @@ function DashboardShell({ user, token, onLogout, children }: {
           </div>
 
           <div className="flex items-center gap-3">
+            <button onClick={() => onGlobalTab("main")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+              style={{ background: globalTab === "main" ? "rgba(255,255,255,0.1)" : "transparent", color: globalTab === "main" ? "#fff" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <Icon name="LayoutDashboard" size={13} />
+              <span className="hidden sm:inline">Кабинет</span>
+            </button>
+            <button onClick={() => onGlobalTab("ttk")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+              style={{ background: globalTab === "ttk" ? "#FBBF24" : "transparent", color: globalTab === "ttk" ? "#000" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <Icon name="BookOpen" size={13} />
+              <span className="hidden sm:inline">Тех. карты</span>
+            </button>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
               style={{ background: `${color}18`, border: `1px solid ${color}44` }}>
               <Icon name={icon} size={13} style={{ color }} />
-              <span className="text-xs font-semibold" style={{ color }}>{ROLE_LABELS[user.role_code]}</span>
+              <span className="text-xs font-semibold hidden sm:inline" style={{ color }}>{ROLE_LABELS[user.role_code]}</span>
             </div>
-            <div className="text-sm text-white hidden sm:block">{user.full_name}</div>
+            <div className="text-sm text-white hidden lg:block">{user.full_name}</div>
             <button onClick={onLogout}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all hover:bg-white/10"
               style={{ color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <Icon name="LogOut" size={13} />
-              Выйти
+              <span className="hidden sm:inline">Выйти</span>
             </button>
           </div>
         </div>
@@ -460,7 +474,22 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
 
 // ─── Constructor cabinet ───────────────────────────────────────────────────────
 function ConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
-  return <MaterialsDB user={user} token={token} />;
+  const [tab, setTab] = useState<"materials"|"ttk">("materials");
+  return (
+    <div>
+      <div className="flex gap-2 mb-6 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)" }}>
+        {([["materials","Материалы","Package"],["ttk","Тех. карты","BookOpen"]] as const).map(([id, label, icon]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            style={{ background: tab === id ? "#FBBF24" : "transparent", color: tab === id ? "#000" : "rgba(255,255,255,0.5)" }}>
+            <Icon name={icon} size={14} />{label}
+          </button>
+        ))}
+      </div>
+      {tab === "materials" && <MaterialsDB user={user} token={token} />}
+      {tab === "ttk" && <TechCardsDB token={token} />}
+    </div>
+  );
 }
 
 function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
@@ -1333,6 +1362,7 @@ export default function Staff() {
   const [user, setUser] = useState<StaffUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
+  const [globalTab, setGlobalTab] = useState<"main"|"ttk">("main");
 
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY);
@@ -1366,6 +1396,7 @@ export default function Staff() {
   if (!user || !token) return <LoginScreen onLogin={handleLogin} />;
 
   const renderCabinet = () => {
+    if (globalTab === "ttk") return <TechCardsDB token={token} />;
     switch (user.role_code) {
       case "architect": return <ArchitectCabinetNew user={user} token={token} />;
       case "constructor": return <ConstructorCabinet user={user} token={token} />;
@@ -1375,7 +1406,7 @@ export default function Staff() {
   };
 
   return (
-    <DashboardShell user={user} token={token} onLogout={handleLogout}>
+    <DashboardShell user={user} token={token} onLogout={handleLogout} globalTab={globalTab} onGlobalTab={setGlobalTab}>
       {renderCabinet()}
     </DashboardShell>
   );
