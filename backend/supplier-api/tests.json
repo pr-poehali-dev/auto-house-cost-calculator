@@ -25,6 +25,13 @@
       "method": "GET",
       "path": "/?action=price_list_get",
       "expectedStatus": 404
+    },
+    {
+      "name": "AI classify no token",
+      "method": "POST",
+      "path": "/?action=ai_classify",
+      "body": {"items": [{"material_name": "Кирпич рядовой М150", "unit": "шт", "category": "Прочее"}]},
+      "expectedStatus": 404
     }
   ]
 }

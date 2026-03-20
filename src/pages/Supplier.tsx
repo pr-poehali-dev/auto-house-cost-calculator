@@ -588,6 +588,7 @@ function PriceListTab({ token }: { token: string }) {
   const [msg, setMsg] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [classifying, setClassifying] = useState(false);
   const [searchQ, setSearchQ] = useState<Record<number, string>>({});
   const [searchRes, setSearchRes] = useState<Record<number, {id:number;name:string;unit:string;category:string}[]>>({});
   const [loadingExisting, setLoadingExisting] = useState(true);
@@ -645,11 +646,11 @@ function PriceListTab({ token }: { token: string }) {
       setUploading(false);
       if (res.parsed_items?.length) {
         const baseKey = keyGen + 1;
-        const newRows: PriceRow[] = res.parsed_items.map((it: { name: string; unit: string; price_per_unit: number; qty?: number }, i: number) => ({
-          material_name: it.name,
+        const newRows: PriceRow[] = res.parsed_items.map((it: { name: string; name_clean?: string; unit: string; price_per_unit: number; category?: string; qty?: number }, i: number) => ({
+          material_name: it.name_clean || it.name,
           unit: it.unit || "шт",
           price_per_unit: it.price_per_unit || "",
-          category: "Прочее",
+          category: it.category || "Прочее",
           article: "",
           note: "",
           is_new_material: true,
@@ -657,12 +658,39 @@ function PriceListTab({ token }: { token: string }) {
         }));
         setRows(prev => [...prev, ...newRows]);
         setKeyGen(baseKey + newRows.length);
-        setUploadMsg(`✓ Распознано ${newRows.length} позиций из файла. Проверьте и сохраните.`);
+        setUploadMsg(`✓ Распознано ${newRows.length} позиций. AI определил категории автоматически.`);
       } else {
         setUploadMsg(res.error || "Файл загружен, но позиции не распознаны автоматически. Добавьте вручную.");
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  // AI-классификация вручную для текущих строк
+  const classifyWithAI = async () => {
+    const toClassify = rows.filter(r => r.material_name.trim());
+    if (!toClassify.length) return;
+    setClassifying(true); setMsg("");
+    const res = await apiFetch(API + "?action=ai_classify", {
+      method: "POST",
+      body: JSON.stringify({ items: toClassify.map(r => ({ material_name: r.material_name, unit: r.unit, category: r.category })) }),
+    }, token);
+    setClassifying(false);
+    if (res.ok && res.items) {
+      setRows(prev => prev.map((row, idx) => {
+        const updated = res.items[idx];
+        if (!updated) return row;
+        return {
+          ...row,
+          category: updated.category || row.category,
+          unit: updated.unit || row.unit,
+          material_name: updated.name_clean || row.material_name,
+        };
+      }));
+      setMsg("✓ AI распознал категории для всех позиций");
+    } else {
+      setMsg(res.error || "Ошибка AI-распознавания");
+    }
   };
 
   // Сохранить прайс
@@ -728,11 +756,21 @@ function PriceListTab({ token }: { token: string }) {
           <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.35)" }}>
             Позиции прайс-листа ({rows.length})
           </span>
-          <button onClick={addRow}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
-            style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
-            <Icon name="Plus" size={13} /> Добавить строку
-          </button>
+          <div className="flex items-center gap-2">
+            {rows.some(r => r.material_name.trim()) && (
+              <button onClick={classifyWithAI} disabled={classifying}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-60"
+                style={{ background: "rgba(139,92,246,0.15)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.3)" }}>
+                <Icon name={classifying ? "Loader" : "Sparkles"} size={13} />
+                {classifying ? "AI думает..." : "Распознать AI"}
+              </button>
+            )}
+            <button onClick={addRow}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+              style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+              <Icon name="Plus" size={13} /> Добавить строку
+            </button>
+          </div>
         </div>
 
         {loadingExisting ? (

@@ -3,12 +3,56 @@ supplier-api: регистрация/авторизация поставщико
 Роутинг через querystring: ?action=register|login|me|profile_update|rfq_list|rfq_get|rfq_create|rfq_award|rfq_close|notify
 |upload_kp_file|price_list_save|price_list_get|materials_search
 """
-import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse, base64, io
+import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse, base64, io, re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone, date
 import psycopg2
 import boto3
+
+CATS = ["Стройматериалы","Отделочные материалы","Кровля","Фундамент","Металлопрокат",
+        "Дерево и пиломатериалы","Инженерия","Электрика","Сантехника","Мебель и отделка","Прочее"]
+
+def ai_classify_materials(items: list) -> list:
+    """GPT-4o-mini: определяет категорию и нормализует единицу измерения для каждой позиции"""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key or not items:
+        return items
+    names = "\n".join(f"{i+1}. {it.get('name','')}" for i, it in enumerate(items))
+    cats_str = ", ".join(CATS)
+    prompt = f"""Ты — эксперт по строительным материалам. Для каждой позиции определи:
+1. category — одна из: {cats_str}
+2. unit — стандартная единица: шт, м², м³, м п.м., кг, т, л, уп, компл, рул
+3. name_clean — очищенное название (убери лишние символы, сокращения расшифруй)
+
+Список позиций:
+{names}
+
+Верни ТОЛЬКО JSON-массив (без пояснений), по одному объекту на каждую позицию:
+[{{"idx":1,"category":"...","unit":"...","name_clean":"..."}}]"""
+    try:
+        data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],"temperature":0.1,"max_tokens":2000}, ensure_ascii=False).encode()
+        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+            headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read())
+        content = result["choices"][0]["message"]["content"].strip()
+        match = re.search(r'\[.*\]', content, re.DOTALL)
+        if match:
+            ai_rows = json.loads(match.group())
+            ai_map = {row["idx"]: row for row in ai_rows if "idx" in row}
+            for i, item in enumerate(items):
+                ai = ai_map.get(i + 1)
+                if ai:
+                    if ai.get("category") and ai["category"] in CATS:
+                        item["category"] = ai["category"]
+                    if ai.get("unit"):
+                        item["unit"] = ai["unit"]
+                    if ai.get("name_clean") and len(ai["name_clean"]) > 2:
+                        item["name_clean"] = ai["name_clean"]
+    except Exception:
+        pass
+    return items
 
 S = "t_p78845984_auto_house_cost_calc"
 CORS = {
@@ -321,7 +365,7 @@ def handler(event, context):
 
     # ══ SUPPLIER: загрузка файла КП, прайс-лист, материалы ══════
 
-    if action in ("upload_kp_file","price_list_save","price_list_get","materials_search","price_list_submit") and sup_token:
+    if action in ("upload_kp_file","price_list_save","price_list_get","materials_search","price_list_submit","ai_classify") and sup_token:
         supplier = get_supplier(conn, sup_token)
         if not supplier: conn.close(); return resp({"error":"Сессия истекла"}, 401)
 
@@ -436,10 +480,14 @@ def handler(event, context):
                                 qty = float(qty_raw) if qty_raw is not None else 1
                                 price = float(str(price_raw).replace(" ","").replace(",",".")) if price_raw else 0
                                 if name and name not in ("None","nan","") and price > 0:
-                                    parsed_items.append({"name":name,"unit":unit,"qty":qty,"price_per_unit":price,"total":qty*price})
+                                    parsed_items.append({"name":name,"unit":unit,"qty":qty,"price_per_unit":price,"total":qty*price,"category":"Прочее"})
                             except: continue
                 except Exception as e:
                     parsed_items = []
+
+            # AI-классификация категорий и нормализация
+            if parsed_items:
+                parsed_items = ai_classify_materials(parsed_items)
 
             cur = conn.cursor()
             cur.execute(f"""
@@ -448,6 +496,20 @@ def handler(event, context):
             """, (supplier["id"], rfq_id, file_name, cdn_url, ext, json.dumps(parsed_items,ensure_ascii=False)))
             fid = cur.fetchone()[0]; conn.commit(); cur.close(); conn.close()
             return resp({"ok":True,"file_id":fid,"file_url":cdn_url,"parsed_items":parsed_items,"parsed_count":len(parsed_items)})
+
+        # AI-классификация списка позиций (вызов вручную с фронта)
+        if action == "ai_classify":
+            items = body.get("items", [])
+            if not items: conn.close(); return resp({"error":"items обязательны"}, 400)
+            conn.close()
+            result = ai_classify_materials([{"name": it.get("material_name",""), "unit": it.get("unit","шт"), "category": it.get("category","Прочее")} for it in items])
+            # Мержим обратно
+            for i, item in enumerate(items):
+                if i < len(result):
+                    if result[i].get("category"): item["category"] = result[i]["category"]
+                    if result[i].get("unit"): item["unit"] = result[i]["unit"]
+                    if result[i].get("name_clean"): item["name_clean"] = result[i]["name_clean"]
+            return resp({"ok": True, "items": items})
 
     conn.close()
     return resp({"error":"Not found"}, 404)
