@@ -17,7 +17,16 @@ const CATEGORIES = [
 interface SupplierUser { id: number; company_name: string; contact_name: string; email: string; phone: string; categories: string; region: string; is_verified: boolean; }
 interface RFQ { id: number; title: string; construction_address: string; area: number; floors: number; house_type: string; items: RFQItem[]; deadline: string | null; status: string; my_proposal?: Proposal; }
 interface RFQItem { name: string; unit: string; qty: number; category: string; }
-interface Proposal { id: number; rfq_id?: number; rfq_title?: string; address?: string; total_amount: number; delivery_days: number; status: string; submitted_at?: string; items?: ProposalItem[]; comment?: string; delivery_conditions?: string; delivery_city?: string; delivery_street?: string; delivery_building?: string; }
+interface Proposal {
+  id: number; rfq_id?: number; rfq_title?: string; address?: string; total_amount: number; delivery_days: number; status: string; submitted_at?: string; items?: ProposalItem[]; comment?: string;
+  delivery_conditions?: string; delivery_city?: string; delivery_street?: string; delivery_building?: string;
+  // Качество
+  quality_gost?: string; quality_certificates?: string; quality_warranty_months?: number;
+  // Приёмка
+  acceptance_method?: string; acceptance_min_batch?: string; acceptance_packaging?: string;
+  // Ресурсы
+  resources_warehouse?: string; resources_transport?: string; resources_managers?: number;
+}
 interface ProposalItem { name: string; unit: string; qty: number; price_per_unit: number; total: number; }
 interface Invoice { id: number; invoice_number: string; amount: number; status: string; created_at: string; rfq_title: string; address: string; }
 
@@ -186,7 +195,13 @@ function RfqList({ token }: { token: string }) {
       (res.rfq.items || []).forEach((item: RFQItem, i: number) => {
         items[i] = { name: item.name, unit: item.unit, qty: item.qty, price_per_unit: 0, total: 0 };
       });
-      setProposalForm({ ...items, comment: "", delivery_days: 14, delivery_conditions: "", delivery_city: "", delivery_street: "", delivery_building: "" });
+      setProposalForm({
+        ...items,
+        comment: "", delivery_days: 14, delivery_conditions: "", delivery_city: "", delivery_street: "", delivery_building: "",
+        quality_gost: "", quality_certificates: "", quality_warranty_months: 12,
+        acceptance_method: "", acceptance_min_batch: "", acceptance_packaging: "",
+        resources_warehouse: "", resources_transport: "", resources_managers: 1,
+      });
     }
   };
 
@@ -211,6 +226,15 @@ function RfqList({ token }: { token: string }) {
         delivery_city: proposalForm.delivery_city,
         delivery_street: proposalForm.delivery_street,
         delivery_building: proposalForm.delivery_building,
+        quality_gost: proposalForm.quality_gost,
+        quality_certificates: proposalForm.quality_certificates,
+        quality_warranty_months: proposalForm.quality_warranty_months,
+        acceptance_method: proposalForm.acceptance_method,
+        acceptance_min_batch: proposalForm.acceptance_min_batch,
+        acceptance_packaging: proposalForm.acceptance_packaging,
+        resources_warehouse: proposalForm.resources_warehouse,
+        resources_transport: proposalForm.resources_transport,
+        resources_managers: proposalForm.resources_managers,
       }),
     }, token);
     setSubmitting(false);
@@ -334,8 +358,115 @@ function RfqList({ token }: { token: string }) {
                 </div>
               </div>
             </div>
+            {/* Качество */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="ShieldCheck" size={14} style={{ color: "var(--neon-green)" }} />
+                <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--neon-green)" }}>Качество</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>ГОСТ / ТУ</label>
+                  <input type="text" value={proposalForm.quality_gost || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, quality_gost: e.target.value }))}
+                    placeholder="ГОСТ 530-2012"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Сертификаты</label>
+                  <input type="text" value={proposalForm.quality_certificates || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, quality_certificates: e.target.value }))}
+                    placeholder="ISO 9001, ПБ, ЭКО"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Гарантия (месяцев)</label>
+                  <input type="number" min={0} value={proposalForm.quality_warranty_months ?? ""}
+                    onChange={e => setProposalForm(p => ({ ...p, quality_warranty_months: +e.target.value }))}
+                    placeholder="12"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Параметры приёмки */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="ClipboardCheck" size={14} style={{ color: "var(--neon-orange)" }} />
+                <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--neon-orange)" }}>Параметры приёмки</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Способ приёмки</label>
+                  <select value={proposalForm.acceptance_method || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, acceptance_method: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    <option value="">Не указано</option>
+                    <option>По накладной</option>
+                    <option>С замером на объекте</option>
+                    <option>По факту монтажа</option>
+                    <option>Лабораторный контроль</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Мин. партия</label>
+                  <input type="text" value={proposalForm.acceptance_min_batch || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, acceptance_min_batch: e.target.value }))}
+                    placeholder="1 паллет / 100 шт."
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Упаковка</label>
+                  <input type="text" value={proposalForm.acceptance_packaging || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, acceptance_packaging: e.target.value }))}
+                    placeholder="Паллет, стрейч-плёнка"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Ресурсы */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="Warehouse" size={14} style={{ color: "#A855F7" }} />
+                <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#A855F7" }}>Ресурсы</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Склад</label>
+                  <input type="text" value={proposalForm.resources_warehouse || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, resources_warehouse: e.target.value }))}
+                    placeholder="Москва, 5000 м²"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Транспорт</label>
+                  <input type="text" value={proposalForm.resources_transport || ""}
+                    onChange={e => setProposalForm(p => ({ ...p, resources_transport: e.target.value }))}
+                    placeholder="3 фуры до 20 т"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Кол-во менеджеров</label>
+                  <input type="number" min={1} value={proposalForm.resources_managers ?? ""}
+                    onChange={e => setProposalForm(p => ({ ...p, resources_managers: +e.target.value }))}
+                    placeholder="1"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              </div>
+            </div>
+
             <div className="mb-4">
-              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Комментарий / гарантии</label>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Комментарий / особые условия</label>
               <input type="text" value={proposalForm.comment || ""}
                 onChange={e => setProposalForm(p => ({ ...p, comment: e.target.value }))}
                 placeholder="Условия оплаты, гарантии, особые условия..."

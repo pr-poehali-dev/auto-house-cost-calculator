@@ -377,16 +377,15 @@ def handler(event, context):
             items = body.get("items",[])
             if not rfq_id or not items: conn.close(); return resp({"error":"rfq_id и items обязательны"}, 400)
             total = sum(float(i.get("total",0)) for i in items)
-            delivery_conditions = body.get("delivery_conditions","")
-            delivery_city = body.get("delivery_city","")
-            delivery_street = body.get("delivery_street","")
-            delivery_building = body.get("delivery_building","")
             cur = conn.cursor()
             cur.execute(f"""
                 INSERT INTO {S}.proposals
                     (rfq_id,supplier_id,items,total_amount,delivery_days,comment,
-                     delivery_conditions,delivery_city,delivery_street,delivery_building)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     delivery_conditions,delivery_city,delivery_street,delivery_building,
+                     quality_gost,quality_certificates,quality_warranty_months,
+                     acceptance_method,acceptance_min_batch,acceptance_packaging,
+                     resources_warehouse,resources_transport,resources_managers)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (rfq_id,supplier_id) DO UPDATE
                 SET items=EXCLUDED.items,total_amount=EXCLUDED.total_amount,
                     delivery_days=EXCLUDED.delivery_days,comment=EXCLUDED.comment,
@@ -394,11 +393,27 @@ def handler(event, context):
                     delivery_city=EXCLUDED.delivery_city,
                     delivery_street=EXCLUDED.delivery_street,
                     delivery_building=EXCLUDED.delivery_building,
+                    quality_gost=EXCLUDED.quality_gost,
+                    quality_certificates=EXCLUDED.quality_certificates,
+                    quality_warranty_months=EXCLUDED.quality_warranty_months,
+                    acceptance_method=EXCLUDED.acceptance_method,
+                    acceptance_min_batch=EXCLUDED.acceptance_min_batch,
+                    acceptance_packaging=EXCLUDED.acceptance_packaging,
+                    resources_warehouse=EXCLUDED.resources_warehouse,
+                    resources_transport=EXCLUDED.resources_transport,
+                    resources_managers=EXCLUDED.resources_managers,
                     submitted_at=NOW()
                 RETURNING id
             """, (rfq_id,supplier["id"],json.dumps(items,ensure_ascii=False),total,
                   body.get("delivery_days"),body.get("comment",""),
-                  delivery_conditions,delivery_city,delivery_street,delivery_building))
+                  body.get("delivery_conditions",""),body.get("delivery_city",""),
+                  body.get("delivery_street",""),body.get("delivery_building",""),
+                  body.get("quality_gost",""),body.get("quality_certificates",""),
+                  body.get("quality_warranty_months",0),
+                  body.get("acceptance_method",""),body.get("acceptance_min_batch",""),
+                  body.get("acceptance_packaging",""),
+                  body.get("resources_warehouse",""),body.get("resources_transport",""),
+                  body.get("resources_managers",1)))
             pid = cur.fetchone()[0]; conn.commit(); cur.close(); conn.close()
             return resp({"ok":True,"id":pid})
 
