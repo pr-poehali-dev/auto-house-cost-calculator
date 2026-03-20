@@ -8,11 +8,11 @@
       "expectedStatus": 401
     },
     {
-      "name": "Register with wrong admin key",
+      "name": "Register with missing fields",
       "method": "POST",
       "path": "/",
-      "body": {"action": "register", "admin_key": "wrong", "login": "test", "full_name": "Test", "role_code": "engineer", "password": "test123"},
-      "expectedStatus": 403
+      "body": {"action": "register", "login": "", "full_name": "", "role_code": "engineer", "password": ""},
+      "expectedStatus": 400
     },
     {
       "name": "Get me without token",

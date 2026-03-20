@@ -58,12 +58,6 @@ def handler(event: dict, context) -> dict:
 
     # POST — register
     if method == "POST" and action == "register":
-        admin_key = body.get("admin_key", "")
-        expected = os.environ.get("STAFF_ADMIN_KEY", "")
-        if not expected or admin_key != expected:
-            conn.close()
-            return json_resp({"error": "Неверный ключ доступа"}, 403)
-
         login = body.get("login", "").strip()
         full_name = body.get("full_name", "").strip()
         role_code = body.get("role_code", "").strip()

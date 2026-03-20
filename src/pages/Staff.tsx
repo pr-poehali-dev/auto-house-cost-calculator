@@ -99,7 +99,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) =>
   const [password, setPassword] = useState("");
 
   // Register state
-  const [regForm, setRegForm] = useState({ login: "", full_name: "", role_code: "architect", password: "", admin_key: "" });
+  const [regForm, setRegForm] = useState({ login: "", full_name: "", role_code: "architect", password: "" });
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -207,12 +207,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) =>
               <input type="password" value={regForm.password} onChange={e => setRegForm(p => ({ ...p, password: e.target.value }))} placeholder="Минимум 6 символов"
                 className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
             </div>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Ключ доступа</label>
-              <input type="password" value={regForm.admin_key} onChange={e => setRegForm(p => ({ ...p, admin_key: e.target.value }))} placeholder="Выдаётся администратором"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-              <p className="text-xs mt-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>Секретный ключ знает только администратор компании</p>
-            </div>
+
             {error && <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>}
             <button type="submit" disabled={loading}
               className="w-full py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all hover:scale-[1.02] disabled:opacity-60"
