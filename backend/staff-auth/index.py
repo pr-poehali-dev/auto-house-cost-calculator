@@ -1,5 +1,5 @@
 """
-Авторизация сотрудников: login, me, logout, set_password
+Авторизация сотрудников: login, register, me, logout, change_password
 """
 import json, os, hashlib, secrets
 import psycopg2
@@ -55,6 +55,50 @@ def handler(event: dict, context) -> dict:
     token = event.get("headers", {}).get("X-Auth-Token", "")
 
     conn = get_conn()
+
+    # POST — register
+    if method == "POST" and action == "register":
+        admin_key = body.get("admin_key", "")
+        expected = os.environ.get("STAFF_ADMIN_KEY", "")
+        if not expected or admin_key != expected:
+            conn.close()
+            return json_resp({"error": "Неверный ключ доступа"}, 403)
+
+        login = body.get("login", "").strip()
+        full_name = body.get("full_name", "").strip()
+        role_code = body.get("role_code", "").strip()
+        password = body.get("password", "")
+
+        if not login or not full_name or not role_code or not password:
+            conn.close()
+            return json_resp({"error": "Заполните все поля"}, 400)
+        if len(password) < 6:
+            conn.close()
+            return json_resp({"error": "Пароль должен быть не менее 6 символов"}, 400)
+
+        cur = conn.cursor()
+        cur.execute(f"SELECT id FROM {SCHEMA}.staff WHERE login = %s", (login,))
+        if cur.fetchone():
+            cur.close(); conn.close()
+            return json_resp({"error": "Логин уже занят"}, 400)
+
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.staff (login, password_hash, full_name, role_code) VALUES (%s, %s, %s, %s) RETURNING id",
+            (login, hash_password(password), full_name, role_code)
+        )
+        staff_id = cur.fetchone()[0]
+        conn.commit(); cur.close()
+
+        new_token = secrets.token_hex(32)
+        expires = datetime.now(timezone.utc) + timedelta(days=30)
+        cur2 = conn.cursor()
+        cur2.execute(
+            f"INSERT INTO {SCHEMA}.sessions (staff_id, token, expires_at) VALUES (%s, %s, %s)",
+            (staff_id, new_token, expires)
+        )
+        conn.commit(); cur2.close(); conn.close()
+
+        return json_resp({"token": new_token, "staff": {"id": staff_id, "login": login, "full_name": full_name, "role_code": role_code}})
 
     # POST — login
     if method == "POST" and (action == "login" or path.endswith("/login") or ("login" in body and "password" in body and not action)):

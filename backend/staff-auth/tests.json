@@ -8,6 +8,13 @@
       "expectedStatus": 401
     },
     {
+      "name": "Register with wrong admin key",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "register", "admin_key": "wrong", "login": "test", "full_name": "Test", "role_code": "engineer", "password": "test123"},
+      "expectedStatus": 403
+    },
+    {
       "name": "Get me without token",
       "method": "GET",
       "path": "/",
