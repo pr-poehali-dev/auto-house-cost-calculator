@@ -1,8 +1,8 @@
 """
 База материалов и работ: CRUD для конструктора/архитектора/снабженца,
-предложения поставщиков, автообновление лучшей цены
+предложения поставщиков, автообновление лучшей цены, AI-поиск
 """
-import json, os
+import json, os, re, urllib.request
 import psycopg2
 
 S = "t_p78845984_auto_house_cost_calc"
@@ -293,6 +293,82 @@ def handler(event: dict, context) -> dict:
         cur.execute(f"SELECT DISTINCT category FROM {S}.materials WHERE is_active=TRUE ORDER BY category")
         cats = [r[0] for r in cur.fetchall()]; cur.close(); conn.close()
         return resp({"categories": cats})
+
+    # ── POST AI-поиск материалов ───────────────────────────────────────────────
+    if method == "POST" and action == "ai_search":
+        if not staff: conn.close(); return resp({"error":"Не авторизован"}, 401)
+        query = body.get("query","").strip()
+        if not query: conn.close(); return resp({"error":"query обязателен"}, 400)
+
+        # Загружаем все материалы из БД
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT m.id,m.item_type,m.category,m.name,m.unit,m.price_per_unit,m.qty_formula,"
+            f"m.article,m.description,m.best_price,m.best_price_updated_at,m.sort_order,m.is_active,m.updated_at,"
+            f"sup.company_name "
+            f"FROM {S}.materials m "
+            f"LEFT JOIN {S}.suppliers sup ON sup.id=m.best_price_supplier_id "
+            f"WHERE m.is_active=TRUE ORDER BY m.category,m.name")
+        all_items = [mat_row(r) for r in cur.fetchall()]
+        cur.close()
+
+        # Сначала делаем быстрый текстовый пре-фильтр (топ-80 по релевантности слов)
+        q_words = [w.lower() for w in re.split(r'\s+', query) if len(w) > 2]
+        def score(it):
+            text = (it["name"] + " " + it["category"] + " " + (it["description"] or "")).lower()
+            return sum(1 for w in q_words if w in text)
+        scored = sorted(all_items, key=score, reverse=True)
+        # Берём top-80 с ненулевым скором + все с нулевым если всё равно мало
+        top = [x for x in scored if score(x) > 0][:80] or scored[:80]
+
+        # Формируем каталог для GPT
+        catalog_lines = "\n".join(
+            f"{i+1}. [{it['category']}] {it['name']} ({it['unit']}) — "
+            f"{'лучшая: '+str(round(it['best_price']))+' ₽' if it['best_price'] else 'цена: '+str(round(it['price_per_unit']))+' ₽'}"
+            for i, it in enumerate(top)
+        )
+
+        api_key = os.environ.get("OPENAI_API_KEY","")
+        if not api_key:
+            # Fallback: текстовый поиск
+            conn.close()
+            return resp({"items": top[:20], "ai_reply": "AI недоступен, показан текстовый поиск.", "mode": "text"})
+
+        prompt = f"""Ты — умный ассистент по строительным материалам. Менеджер ищет: «{query}»
+
+Вот каталог материалов (пронумерованный список):
+{catalog_lines}
+
+Задача:
+1. Найди ВСЕ подходящие позиции из каталога (могут быть синонимы, похожие названия, смежные категории).
+2. Ранжируй по релевантности — сначала самые точные совпадения.
+3. Верни краткий дружелюбный комментарий для менеджера (1-2 предложения): что нашёл, на что обратить внимание.
+
+Верни ТОЛЬКО JSON (без пояснений вне JSON):
+{{"reply": "...", "indices": [1, 5, 12, ...]}}
+
+Где indices — номера из списка выше (1-based), максимум 30 позиций."""
+
+        try:
+            data = json.dumps({"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
+                               "temperature":0.2,"max_tokens":800}, ensure_ascii=False).encode()
+            req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+                headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
+            with urllib.request.urlopen(req, timeout=25) as r:
+                result = json.loads(r.read())
+            content = result["choices"][0]["message"]["content"].strip()
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if match:
+                ai_result = json.loads(match.group())
+                indices = [i-1 for i in ai_result.get("indices",[]) if 1 <= i <= len(top)]
+                found = [top[i] for i in indices]
+                conn.close()
+                return resp({"items": found, "ai_reply": ai_result.get("reply",""), "mode": "ai"})
+        except Exception as e:
+            pass
+
+        conn.close()
+        return resp({"items": top[:20], "ai_reply": "Показаны наиболее подходящие результаты.", "mode": "text"})
 
     conn.close()
     return resp({"error":"Not found"}, 404)

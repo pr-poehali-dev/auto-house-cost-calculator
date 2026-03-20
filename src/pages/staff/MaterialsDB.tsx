@@ -309,6 +309,10 @@ export default function MaterialsDB({ user, token, onImportToSpec }: {
   const [filterCat, setFilterCat] = useState("Все");
   const [filterType, setFilterType] = useState("Все");
   const [search, setSearch] = useState("");
+  const [aiQuery, setAiQuery] = useState("");
+  const [aiResult, setAiResult] = useState<Material[] | null>(null);
+  const [aiReply, setAiReply] = useState("");
+  const [aiSearching, setAiSearching] = useState(false);
   const [openOffers, setOpenOffers] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editBuf, setEditBuf] = useState<Partial<Material>>({});
@@ -336,7 +340,20 @@ export default function MaterialsDB({ user, token, onImportToSpec }: {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = items.filter(it => {
+  const doAiSearch = async () => {
+    if (!aiQuery.trim()) return;
+    setAiSearching(true); setAiReply(""); setAiResult(null);
+    const res = await apiFetch(`${MAT_URL}?action=ai_search`, { method:"POST", body: JSON.stringify({ query: aiQuery }) }, token);
+    setAiSearching(false);
+    if (res.items) { setAiResult(res.items); setAiReply(res.ai_reply || ""); }
+  };
+
+  const clearAiSearch = () => { setAiResult(null); setAiReply(""); setAiQuery(""); };
+
+  const displayItems = aiResult !== null ? aiResult : items;
+
+  const filtered = displayItems.filter(it => {
+    if (aiResult !== null) return true; // AI уже отфильтровал
     if (filterCat !== "Все" && it.category !== filterCat) return false;
     if (filterType !== "Все" && it.item_type !== filterType) return false;
     if (search && !it.name.toLowerCase().includes(search.toLowerCase()) && !it.article.toLowerCase().includes(search.toLowerCase())) return false;
@@ -479,30 +496,79 @@ export default function MaterialsDB({ user, token, onImportToSpec }: {
             </div>
           )}
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl flex-1 min-w-48" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)" }}>
-              <Icon name="Search" size={14} style={{ color:"rgba(255,255,255,0.3)" }} />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Поиск по названию или артикулу..." className="bg-transparent outline-none text-sm text-white flex-1"
-                style={{ color:"rgba(255,255,255,0.8)" }} />
+          {/* AI-поиск */}
+          <div className="rounded-2xl p-4 mb-4" style={{ background:"linear-gradient(135deg, rgba(168,85,247,0.08), rgba(0,212,255,0.05))", border:"1px solid rgba(168,85,247,0.25)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Icon name="Sparkles" size={14} style={{ color:"#a78bfa" }} />
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color:"#a78bfa" }}>AI-ассистент поиска</span>
             </div>
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
-              className="px-3 py-2 rounded-xl text-sm text-white outline-none"
-              style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)" }}>
-              <option value="Все">Все типы</option>
-              <option value="material">Материалы</option>
-              <option value="work">Работы</option>
-            </select>
-            <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
-              className="px-3 py-2 rounded-xl text-sm text-white outline-none"
-              style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)" }}>
-              <option value="Все">Все категории</option>
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl flex-1" style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(168,85,247,0.3)" }}>
+                <Icon name="MessageCircle" size={14} style={{ color:"rgba(255,255,255,0.3)" }} />
+                <input
+                  value={aiQuery}
+                  onChange={e => setAiQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && doAiSearch()}
+                  placeholder="Опишите что ищете... например: «утеплитель для фасада 50мм» или «крепёж для кровли»"
+                  className="bg-transparent outline-none text-sm flex-1"
+                  style={{ color:"rgba(255,255,255,0.85)" }}
+                />
+                {aiQuery && <button onClick={clearAiSearch} style={{ color:"rgba(255,255,255,0.25)" }}><Icon name="X" size={13} /></button>}
+              </div>
+              <button onClick={doAiSearch} disabled={aiSearching || !aiQuery.trim()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50"
+                style={{ background:"linear-gradient(135deg,#a855f7,#7c3aed)", color:"#fff", boxShadow:"0 0 16px rgba(168,85,247,0.3)" }}>
+                <Icon name={aiSearching ? "Loader" : "Search"} size={14} />
+                {aiSearching ? "Ищу..." : "Найти"}
+              </button>
+            </div>
+            {aiReply && (
+              <div className="mt-3 flex items-start gap-2 px-3 py-2 rounded-xl" style={{ background:"rgba(168,85,247,0.08)", border:"1px solid rgba(168,85,247,0.15)" }}>
+                <Icon name="Bot" size={14} style={{ color:"#a78bfa", marginTop:2, flexShrink:0 }} />
+                <span className="text-sm" style={{ color:"rgba(255,255,255,0.75)" }}>{aiReply}</span>
+              </div>
+            )}
+            {aiResult !== null && (
+              <div className="mt-2 flex items-center gap-3">
+                <span className="text-xs" style={{ color:"rgba(255,255,255,0.4)" }}>Найдено: <b style={{ color:"#a78bfa" }}>{aiResult.length}</b> позиций</span>
+                <button onClick={clearAiSearch} className="text-xs underline transition-opacity hover:opacity-70" style={{ color:"rgba(255,255,255,0.35)" }}>
+                  Сбросить и показать всё
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="text-xs mb-3" style={{ color:"rgba(255,255,255,0.35)" }}>Показано: {filtered.length} из {items.length}</div>
+          {/* Доп. фильтры (только когда AI не активен) */}
+          {aiResult === null && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl flex-1 min-w-48" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)" }}>
+                <Icon name="Search" size={14} style={{ color:"rgba(255,255,255,0.3)" }} />
+                <input value={search} onChange={e => setSearch(e.target.value)}
+                  placeholder="Быстрый поиск по названию..." className="bg-transparent outline-none text-sm text-white flex-1"
+                  style={{ color:"rgba(255,255,255,0.8)" }} />
+              </div>
+              <select value={filterType} onChange={e => setFilterType(e.target.value)}
+                className="px-3 py-2 rounded-xl text-sm text-white outline-none"
+                style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)" }}>
+                <option value="Все">Все типы</option>
+                <option value="material">Материалы</option>
+                <option value="work">Работы</option>
+              </select>
+              <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
+                className="px-3 py-2 rounded-xl text-sm text-white outline-none"
+                style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)" }}>
+                <option value="Все">Все категории</option>
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="text-xs mb-3" style={{ color:"rgba(255,255,255,0.35)" }}>
+            {aiResult !== null
+              ? <span>AI нашёл <b>{filtered.length}</b> позиций · <span style={{ color:"rgba(255,255,255,0.2)" }}>всего в базе: {items.length}</span></span>
+              : <span>Показано: {filtered.length} из {items.length}</span>
+            }
+          </div>
 
           {loading ? (
             <div className="text-center py-16" style={{ color:"rgba(255,255,255,0.3)" }}>Загрузка базы...</div>

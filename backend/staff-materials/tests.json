@@ -11,6 +11,13 @@
       "method": "GET",
       "path": "/",
       "expectedStatus": 401
+    },
+    {
+      "name": "AI search without token returns 401",
+      "method": "POST",
+      "path": "/?action=ai_search",
+      "body": {"query": "утеплитель"},
+      "expectedStatus": 401
     }
   ]
 }
