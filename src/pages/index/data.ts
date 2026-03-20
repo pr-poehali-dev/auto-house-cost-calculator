@@ -67,6 +67,7 @@ export const PROJECTS = [
     tagColor: "#00D4FF",
     desc: "Современный одноэтажный дом в скандинавском стиле",
     features: ["Панорамные окна", "Открытая планировка", "Эко-материалы"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/002d667c-3c75-4f59-93e9-07ddef3336d0.jpg",
   },
   {
     id: 2,
@@ -80,6 +81,7 @@ export const PROJECTS = [
     tagColor: "#FF6B1A",
     desc: "Двухэтажный кирпичный дом с просторными комнатами",
     features: ["Камин", "Подвал", "Гараж на 2 авто"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/6873e7d8-5b67-49ca-93b4-7aee48e80bb9.jpg",
   },
   {
     id: 3,
@@ -93,6 +95,7 @@ export const PROJECTS = [
     tagColor: "#00FF88",
     desc: "Трёхэтажный монолитный дом с эксплуатируемой кровлей",
     features: ["Кровельная терраса", "Лифт", "Умный дом"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/91919a41-e34e-43ad-bed9-f3f928ab8ff8.jpg",
   },
   {
     id: 4,
@@ -106,6 +109,7 @@ export const PROJECTS = [
     tagColor: "#A855F7",
     desc: "Двухэтажный деревянный дом с мансардой",
     features: ["Мансарда", "Панорамная баня", "Терраса"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/441eb3d3-681e-4169-8441-9725fb56b00d.jpg",
   },
   {
     id: 5,
@@ -119,6 +123,7 @@ export const PROJECTS = [
     tagColor: "#FBBF24",
     desc: "Компактный дом для молодой семьи",
     features: ["Оптимальная площадь", "Энергоэффективность", "Быстрое строительство"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/3341174f-aa1f-4029-bea4-97a935b4ed71.jpg",
   },
   {
     id: 6,
@@ -132,6 +137,7 @@ export const PROJECTS = [
     tagColor: "#EC4899",
     desc: "Элитная вилла с полным набором опций",
     features: ["Бассейн", "Кинозал", "Винный погреб"],
+    image: "https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/ba93f6ea-768b-441f-b7c2-c54d27dafc72.jpg",
   },
 ];
 

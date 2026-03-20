@@ -113,18 +113,29 @@ export function ProjectsTab({ selectedProject, setSelectedProject, compareList, 
               animation: `fadeInUp 0.5s ease-out ${i * 0.07}s both`,
             }}
             onClick={() => setSelectedProject(selectedProject === p.id ? null : p.id)}>
-            <div className="px-5 pt-5 flex items-start justify-between">
-              <div className="px-3 py-1 rounded-full text-xs font-semibold font-display"
-                style={{ background: `${p.tagColor}22`, color: p.tagColor, border: `1px solid ${p.tagColor}44` }}>
+            {/* Фото дома */}
+            <div className="relative w-full h-44 overflow-hidden">
+              <img
+                src={p.image}
+                alt={p.name}
+                className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                loading="lazy"
+              />
+              <div className="absolute inset-0"
+                style={{ background: "linear-gradient(to bottom, transparent 45%, rgba(10,13,20,0.9) 100%)" }} />
+              <div className="absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold font-display"
+                style={{ background: `${p.tagColor}ee`, color: "#0A0D14", backdropFilter: "blur(4px)" }}>
                 {p.tag}
               </div>
               <button
                 onClick={e => { e.stopPropagation(); toggleCompare(p.id); }}
-                className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-110"
+                className="absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-110"
                 title="Сравнить"
                 style={{
-                  background: compareList.includes(p.id) ? "var(--neon-cyan)" : "rgba(255,255,255,0.07)",
-                  color: compareList.includes(p.id) ? "#000" : "rgba(255,255,255,0.4)",
+                  background: compareList.includes(p.id) ? "var(--neon-cyan)" : "rgba(10,13,20,0.55)",
+                  color: compareList.includes(p.id) ? "#000" : "rgba(255,255,255,0.75)",
+                  backdropFilter: "blur(6px)",
+                  border: compareList.includes(p.id) ? "none" : "1px solid rgba(255,255,255,0.15)",
                 }}>
                 <Icon name="GitCompare" size={13} />
               </button>
