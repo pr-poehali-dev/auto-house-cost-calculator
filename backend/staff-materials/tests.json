@@ -1,0 +1,10 @@
+{
+  "tests": [
+    {
+      "name": "Get materials without token",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "tests": [
+    {
+      "name": "Get projects without token",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401
+    }
+  ]
+}

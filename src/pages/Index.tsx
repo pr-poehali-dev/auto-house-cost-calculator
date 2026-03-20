@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -295,6 +296,7 @@ const NAV_ITEMS = [
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function Index() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("calc");
 
   // Calculator state
@@ -457,14 +459,23 @@ export default function Index() {
             ))}
           </nav>
 
-          <div className="sm:hidden flex gap-1">
-            {NAV_ITEMS.map(item => (
-              <button key={item.id} onClick={() => setActiveTab(item.id)}
-                className="p-2 rounded-lg transition-all"
-                style={{ background: activeTab === item.id ? "var(--neon-orange)" : "rgba(255,255,255,0.05)", color: "#fff" }}>
-                <Icon name={item.icon} size={18} />
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="sm:hidden flex gap-1">
+              {NAV_ITEMS.map(item => (
+                <button key={item.id} onClick={() => setActiveTab(item.id)}
+                  className="p-2 rounded-lg transition-all"
+                  style={{ background: activeTab === item.id ? "var(--neon-orange)" : "rgba(255,255,255,0.05)", color: "#fff" }}>
+                  <Icon name={item.icon} size={18} />
+                </button>
+              ))}
+            </div>
+            <button onClick={() => navigate("/staff")}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all hover:bg-white/10"
+              style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.45)" }}
+              title="Личный кабинет сотрудника">
+              <Icon name="Users" size={13} />
+              <span className="hidden sm:inline">Сотрудники</span>
+            </button>
           </div>
         </div>
       </header>
