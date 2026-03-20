@@ -99,9 +99,18 @@ interface SpecItem {
   qty: number; price_per_unit: number; total_price: number; note: string;
 }
 
+interface TechCardResource {
+  type: "material" | "tool" | "labor";
+  name: string;
+  unit: string;
+  qty_per_unit: number;
+  note?: string;
+}
+
 interface TechCard {
   id: number; title: string; category: string; description: string;
   content: Array<{ step: number; name: string; desc: string; duration: string }>;
+  resources?: TechCardResource[];
 }
 
 // ─── TechCards modal ─────────────────────────────────────────────────────────
@@ -110,17 +119,45 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
   const [cards, setCards] = useState<TechCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [openCard, setOpenCard] = useState<number | null>(null);
+  const [openTab, setOpenTab] = useState<Record<number, "steps"|"resources">>({});
   const [attached, setAttached] = useState<Set<number>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [fillingId, setFillingId] = useState<number | null>(null);
+  const [fillingAll, setFillingAll] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadCards = () => {
+    setLoading(true);
     apiFetch(`${PROJECTS_URL}?action=tech_cards`, {}, token)
       .then(r => { setCards(r.tech_cards || []); setLoading(false); });
   };
 
   useEffect(() => { loadCards(); }, [token]);
+
+  const fillResources = async (cardId: number) => {
+    setFillingId(cardId);
+    const res = await apiFetch(`${PROJECTS_URL}?action=tech_card_fill_resources`, {
+      method: "POST", body: JSON.stringify({ id: cardId }),
+    }, token);
+    setFillingId(null);
+    if (res.ok) {
+      setCards(prev => prev.map(c => c.id === cardId ? { ...c, resources: res.resources } : c));
+      setOpenTab(prev => ({ ...prev, [cardId]: "resources" }));
+    }
+  };
+
+  const fillAllResources = async () => {
+    setFillingAll(true);
+    const empty = cards.filter(c => !c.resources?.length);
+    for (const card of empty) {
+      const res = await apiFetch(`${PROJECTS_URL}?action=tech_card_fill_resources`, {
+        method: "POST", body: JSON.stringify({ id: card.id }),
+      }, token);
+      if (res.ok) setCards(prev => prev.map(c => c.id === card.id ? { ...c, resources: res.resources } : c));
+    }
+    setFillingAll(false);
+  };
 
   const attach = async (cardId: number) => {
     await apiFetch(`${PROJECTS_URL}?action=tech_card_attach`, {
@@ -170,6 +207,14 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
             <h3 className="font-display font-bold text-xl text-white">Технологические карты</h3>
           </div>
           <div className="flex items-center gap-2">
+            {cards.some(c => !c.resources?.length) && (
+              <button onClick={fillAllResources} disabled={fillingAll}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+                style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+                <Icon name={fillingAll ? "Loader" : "Sparkles"} size={13} />
+                {fillingAll ? "Анализ..." : "AI: заполнить ресурсы"}
+              </button>
+            )}
             <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls" className="hidden"
               onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
@@ -211,54 +256,137 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
                 <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>({cards.filter(c => c.category === cat).length})</span>
               </div>
               <div className="space-y-2">
-                {cards.filter(c => c.category === cat).map(card => (
-                  <div key={card.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
-                    <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-white/5"
-                      onClick={() => setOpenCard(openCard === card.id ? null : card.id)}
-                      style={{ background: "rgba(255,255,255,0.03)" }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-white truncate">{card.title}</div>
-                        <div className="text-xs mt-0.5 flex items-center gap-2" style={{ color: "rgba(255,255,255,0.35)" }}>
-                          <span>{card.description}</span>
-                          {card.content?.length > 0 && (
-                            <span className="px-1.5 py-0.5 rounded" style={{ background: "rgba(168,85,247,0.12)", color: "#a78bfa", fontSize: "10px" }}>
-                              {card.content.length} шагов
-                            </span>
-                          )}
+                {cards.filter(c => c.category === cat).map(card => {
+                  const tab = openTab[card.id] || "steps";
+                  const hasResources = (card.resources?.length || 0) > 0;
+                  return (
+                    <div key={card.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+                      {/* Заголовок карты */}
+                      <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-white/5"
+                        onClick={() => setOpenCard(openCard === card.id ? null : card.id)}
+                        style={{ background: "rgba(255,255,255,0.03)" }}>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-white truncate">{card.title}</div>
+                          <div className="text-xs mt-0.5 flex items-center gap-2" style={{ color: "rgba(255,255,255,0.35)" }}>
+                            {card.description && <span className="truncate max-w-xs">{card.description}</span>}
+                            {card.content?.length > 0 && (
+                              <span className="px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(168,85,247,0.12)", color: "#a78bfa", fontSize: "10px" }}>
+                                {card.content.length} шагов
+                              </span>
+                            )}
+                            {hasResources && (
+                              <span className="px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(0,255,136,0.1)", color: "var(--neon-green)", fontSize: "10px" }}>
+                                {card.resources!.length} ресурсов
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                          <button onClick={e => { e.stopPropagation(); attach(card.id); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                            style={{ background: attached.has(card.id) ? "rgba(0,255,136,0.15)" : "rgba(168,85,247,0.2)", color: attached.has(card.id) ? "var(--neon-green)" : "#A855F7", border: `1px solid ${attached.has(card.id) ? "rgba(0,255,136,0.3)" : "rgba(168,85,247,0.3)"}` }}>
+                            {attached.has(card.id) ? "Добавлено ✓" : "В проект"}
+                          </button>
+                          <Icon name={openCard === card.id ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                        <button
-                          onClick={e => { e.stopPropagation(); attach(card.id); }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
-                          style={{
-                            background: attached.has(card.id) ? "rgba(0,255,136,0.15)" : "rgba(168,85,247,0.2)",
-                            color: attached.has(card.id) ? "var(--neon-green)" : "#A855F7",
-                            border: `1px solid ${attached.has(card.id) ? "rgba(0,255,136,0.3)" : "rgba(168,85,247,0.3)"}`,
-                          }}>
-                          {attached.has(card.id) ? "Добавлено ✓" : "В проект"}
-                        </button>
-                        <Icon name={openCard === card.id ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
-                      </div>
-                    </div>
 
-                    {openCard === card.id && card.content?.length > 0 && (
-                      <div className="px-4 py-3 space-y-3" style={{ background: "rgba(168,85,247,0.04)" }}>
-                        {card.content.map((step) => (
-                          <div key={step.step} className="flex gap-3">
-                            <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5"
-                              style={{ background: "rgba(168,85,247,0.2)", color: "#A855F7" }}>{step.step}</div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-white">{step.name}</div>
-                              {step.desc && <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{step.desc}</div>}
-                              {step.duration && <div className="text-xs mt-0.5 flex items-center gap-1" style={{ color: "#A855F7" }}><Icon name="Clock" size={10} /> {step.duration}</div>}
-                            </div>
+                      {/* Раскрытое содержимое */}
+                      {openCard === card.id && (
+                        <div style={{ background: "rgba(168,85,247,0.03)" }}>
+                          {/* Переключатель вкладок */}
+                          <div className="flex items-center gap-1 px-4 pt-3 pb-0">
+                            <button onClick={() => setOpenTab(p => ({ ...p, [card.id]: "steps" }))}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                              style={{ background: tab === "steps" ? "rgba(168,85,247,0.2)" : "transparent", color: tab === "steps" ? "#a78bfa" : "rgba(255,255,255,0.35)", border: tab === "steps" ? "1px solid rgba(168,85,247,0.3)" : "1px solid transparent" }}>
+                              Шаги ({card.content?.length || 0})
+                            </button>
+                            <button onClick={() => setOpenTab(p => ({ ...p, [card.id]: "resources" }))}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                              style={{ background: tab === "resources" ? "rgba(0,255,136,0.12)" : "transparent", color: tab === "resources" ? "var(--neon-green)" : "rgba(255,255,255,0.35)", border: tab === "resources" ? "1px solid rgba(0,255,136,0.25)" : "1px solid transparent" }}>
+                              Ресурсы {hasResources ? `(${card.resources!.length})` : ""}
+                            </button>
+                            {!hasResources && (
+                              <button onClick={e => { e.stopPropagation(); fillResources(card.id); }} disabled={fillingId === card.id}
+                                className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-60"
+                                style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.2)" }}>
+                                <Icon name={fillingId === card.id ? "Loader" : "Sparkles"} size={11} />
+                                {fillingId === card.id ? "Анализ AI..." : "Заполнить AI"}
+                              </button>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+
+                          {/* Шаги */}
+                          {tab === "steps" && (
+                            <div className="px-4 py-3 space-y-3">
+                              {card.content?.length > 0 ? card.content.map((step) => (
+                                <div key={step.step} className="flex gap-3">
+                                  <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5"
+                                    style={{ background: "rgba(168,85,247,0.2)", color: "#A855F7" }}>{step.step}</div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-white">{step.name}</div>
+                                    {step.desc && <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{step.desc}</div>}
+                                    {step.duration && <div className="text-xs mt-0.5 flex items-center gap-1" style={{ color: "#A855F7" }}><Icon name="Clock" size={10} /> {step.duration}</div>}
+                                  </div>
+                                </div>
+                              )) : <div className="text-xs py-2" style={{ color: "rgba(255,255,255,0.3)" }}>Шаги не указаны</div>}
+                            </div>
+                          )}
+
+                          {/* Ресурсы */}
+                          {tab === "resources" && (
+                            <div className="px-4 py-3">
+                              {hasResources ? (
+                                <>
+                                  {(["material","tool","labor"] as const).map(type => {
+                                    const group = card.resources!.filter(r => r.type === type);
+                                    if (!group.length) return null;
+                                    const labels = { material: "Материалы", tool: "Инструмент и механизмы", labor: "Трудозатраты" };
+                                    const colors = { material: "var(--neon-cyan)", tool: "#FBBF24", labor: "#FF6B1A" };
+                                    return (
+                                      <div key={type} className="mb-4">
+                                        <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: colors[type] }}>{labels[type]}</div>
+                                        <table className="w-full text-xs">
+                                          <thead>
+                                            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                                              {["Наименование","Ед.","На ед.","Примечание"].map((h,i) => (
+                                                <th key={i} className="text-left py-1.5 pr-3 font-medium" style={{ color: "rgba(255,255,255,0.3)" }}>{h}</th>
+                                              ))}
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {group.map((r, i) => (
+                                              <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                                <td className="py-1.5 pr-3 text-white">{r.name}</td>
+                                                <td className="py-1.5 pr-3" style={{ color: "rgba(255,255,255,0.5)" }}>{r.unit}</td>
+                                                <td className="py-1.5 pr-3 font-mono font-semibold" style={{ color: colors[type] }}>{r.qty_per_unit}</td>
+                                                <td className="py-1.5" style={{ color: "rgba(255,255,255,0.35)" }}>{r.note || "—"}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    );
+                                  })}
+                                </>
+                              ) : (
+                                <div className="text-center py-6">
+                                  <div className="text-sm mb-2" style={{ color: "rgba(255,255,255,0.35)" }}>Ресурсы не заполнены</div>
+                                  <button onClick={() => fillResources(card.id)} disabled={fillingId === card.id}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold mx-auto transition-all hover:scale-105 disabled:opacity-60"
+                                    style={{ background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+                                    <Icon name={fillingId === card.id ? "Loader" : "Sparkles"} size={14} />
+                                    {fillingId === card.id ? "AI анализирует..." : "Заполнить через AI"}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -266,7 +394,7 @@ function TechCardsModal({ token, projectId, onClose }: { token: string; projectI
 
         {/* Подсказка */}
         <div className="px-5 py-3 border-t text-xs" style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)" }}>
-          Поддерживаются форматы: PDF, Excel (.xlsx, .xls) · AI автоматически извлекает структуру карты
+          Поддерживаются форматы: PDF, Excel (.xlsx, .xls) · AI автоматически извлекает структуру карты и ресурсы
         </div>
       </div>
     </div>

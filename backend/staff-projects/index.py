@@ -354,11 +354,11 @@ def handler(event: dict, context) -> dict:
         cur = conn.cursor()
         cat = qs.get("category", body.get("category", ""))
         if cat:
-            cur.execute(f"SELECT id,title,category,description,content,created_at FROM {S}.tech_cards WHERE is_active=TRUE AND category=%s ORDER BY title", (cat,))
+            cur.execute(f"SELECT id,title,category,description,content,resources,created_at FROM {S}.tech_cards WHERE is_active=TRUE AND category=%s ORDER BY title", (cat,))
         else:
-            cur.execute(f"SELECT id,title,category,description,content,created_at FROM {S}.tech_cards WHERE is_active=TRUE ORDER BY category,title")
+            cur.execute(f"SELECT id,title,category,description,content,resources,created_at FROM {S}.tech_cards WHERE is_active=TRUE ORDER BY category,title")
         rows = cur.fetchall(); cur.close(); conn.close()
-        return resp({"tech_cards":[{"id":r[0],"title":r[1],"category":r[2],"description":r[3],"content":r[4],"created_at":str(r[5])} for r in rows]})
+        return resp({"tech_cards":[{"id":r[0],"title":r[1],"category":r[2],"description":r[3],"content":r[4],"resources":r[5],"created_at":str(r[6])} for r in rows]})
 
     if action == "tech_card_attach":
         if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
@@ -368,6 +368,96 @@ def handler(event: dict, context) -> dict:
         log(conn, staff["id"], "house_projects", pid, "attach_tech_card", str(tc_id))
         conn.commit(); conn.close()
         return resp({"ok":True})
+
+    # ── Заполнить ресурсы техкарты через AI ───────────────────────────────────
+    if action == "tech_card_fill_resources":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        tc_id = body.get("id")
+        if not tc_id: conn.close(); return resp({"error":"id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"SELECT id,title,category,description,content FROM {S}.tech_cards WHERE id=%s AND is_active=TRUE", (tc_id,))
+        row = cur.fetchone()
+        if not row: cur.close(); conn.close(); return resp({"error":"Карта не найдена"}, 404)
+
+        card_id, title, category, description, content = row
+        steps_text = "\n".join(f"Шаг {s['step']}: {s['name']} — {s['desc']}" for s in (content or []))
+
+        api_key = os.environ.get("OPENAI_API_KEY","")
+        resources = []
+
+        if api_key:
+            prompt = f"""Ты — эксперт-сметчик в строительстве. Проанализируй технологическую карту и составь полный список необходимых материалов и ресурсов.
+
+Технологическая карта: «{title}»
+Категория: {category}
+Описание: {description}
+
+Технологические шаги:
+{steps_text}
+
+Составь JSON-список ресурсов. Каждый ресурс — это:
+- type: "material" (материал) | "tool" (инструмент/механизм) | "labor" (трудозатраты)
+- name: точное наименование
+- unit: единица измерения (м², м³, шт, кг, т, пм, ч/чел, смена)
+- qty_per_unit: количество на единицу работы (на 1 м² / 1 м³ итогового результата), число
+- note: краткое пояснение (марка, ГОСТ, особенности) — необязательно
+
+Верни ТОЛЬКО JSON-массив (без пояснений):
+[
+  {{"type":"material","name":"...","unit":"...","qty_per_unit":...,"note":"..."}},
+  ...
+]
+
+Требования:
+- Укажи ВСЕ материалы, включая расходники (крепёж, плёнки, ленты)
+- Укажи основной инструмент и механизмы
+- Укажи трудозатраты (ч/чел на ед. работы)
+- Нормы расхода — реальные строительные нормативы"""
+
+            try:
+                data = json.dumps({"model":"gpt-4o","messages":[{"role":"user","content":prompt}],
+                                   "temperature":0.1,"max_tokens":2500}, ensure_ascii=False).encode()
+                req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data,
+                    headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
+                with urllib.request.urlopen(req, timeout=40) as r:
+                    result = json.loads(r.read())
+                content_str = result["choices"][0]["message"]["content"].strip()
+                match = re.search(r'\[.*\]', content_str, re.DOTALL)
+                if match:
+                    resources = json.loads(match.group())
+            except Exception:
+                pass
+
+        # Сохраняем в БД
+        cur.execute(f"UPDATE {S}.tech_cards SET resources=%s, updated_at=NOW() WHERE id=%s",
+                    (json.dumps(resources, ensure_ascii=False), card_id))
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True, "id": card_id, "resources": resources, "count": len(resources)})
+
+    # ── Заполнить ресурсы для ВСЕХ карт без ресурсов ──────────────────────────
+    if action == "tech_cards_fill_all":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        cur = conn.cursor()
+        cur.execute(f"SELECT id FROM {S}.tech_cards WHERE is_active=TRUE AND (resources='[]'::jsonb OR resources IS NULL)")
+        ids = [r[0] for r in cur.fetchall()]; cur.close(); conn.close()
+        return resp({"ok": True, "pending_ids": ids, "count": len(ids)})
+
+    # ── Обновить техкарту (название, описание, ресурсы) ───────────────────────
+    if action == "tech_card_update":
+        if role not in ("architect","constructor"): conn.close(); return resp({"error":"Нет доступа"}, 403)
+        tc_id = body.get("id")
+        if not tc_id: conn.close(); return resp({"error":"id обязателен"}, 400)
+        fields, vals = [], []
+        for k in ["title","category","description","content","resources"]:
+            if k in body:
+                fields.append(f"{k}=%s")
+                vals.append(json.dumps(body[k], ensure_ascii=False) if isinstance(body[k], list) else body[k])
+        if not fields: conn.close(); return resp({"error":"Нет полей"}, 400)
+        fields.append("updated_at=NOW()"); vals.append(tc_id)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {S}.tech_cards SET {','.join(fields)} WHERE id=%s", vals)
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
 
     # ── Загрузка и парсинг файла технологической карты (PDF / Excel) ──────────
     if action == "tech_card_upload":
