@@ -2,6 +2,48 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3МБ на чанк
+
+async function uploadFileChunked(
+  file: File,
+  projectId: number,
+  fileType: string,
+  token: string,
+  onProgress?: (pct: number) => void
+): Promise<{ cdn_url: string; key: string } | null> {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let uploadId = "";
+  let parts: { PartNumber: number; ETag: string }[] = [];
+
+  for (let i = 0; i < totalChunks; i++) {
+    const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    const arrayBuf = await slice.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+
+    const body: Record<string, unknown> = {
+      project_id: projectId,
+      file_name: file.name,
+      file_type: fileType,
+      chunk: b64,
+      chunk_index: i,
+      total_chunks: totalChunks,
+      upload_id: uploadId,
+      parts,
+    };
+
+    const r = await apiFetch(`${PROJECTS_URL}?action=upload_file`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, token);
+
+    if (!r.ok) return null;
+    if (r.upload_id) uploadId = r.upload_id;
+    if (r.parts) parts = r.parts;
+    onProgress?.(Math.round(((i + 1) / totalChunks) * 100));
+    if (r.done) return { cdn_url: r.cdn_url, key: r.key };
+  }
+  return null;
+}
 
 const HOUSE_TYPES = ["Кирпичный", "Каркасный", "Монолитный", "Деревянный", "Газобетон", "Модульный"];
 const TAG_COLORS = ["#FF6B1A", "#00D4FF", "#00FF88", "#A855F7", "#FBBF24", "#EC4899"];
@@ -396,27 +438,21 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     await loadSpec();
   };
 
-  const uploadFile = async (file: File) => {
-    setUploading(true); setUploadMsg("");
-    try {
-      const r = await apiFetch(`${PROJECTS_URL}?action=upload_file`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType }),
-      }, token);
-      if (!r.presigned_url) { setUploadMsg(r.error || "Ошибка получения ссылки"); setUploading(false); return; }
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-      await fetch(r.presigned_url, {
-        method: "PUT",
-        body: file,
-      });
+  const uploadFile = async (file: File) => {
+    setUploading(true); setUploadMsg(""); setUploadProgress(0);
+    try {
+      const result = await uploadFileChunked(file, project.id, selectedFileType, token, setUploadProgress);
+      if (!result) { setUploadMsg("Ошибка загрузки файла"); setUploading(false); return; }
 
       const r2 = await apiFetch(`${PROJECTS_URL}?action=confirm_upload`, {
         method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType, cdn_url: r.cdn_url }),
+        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType, cdn_url: result.cdn_url }),
       }, token);
       if (r2.ok) { setUploadMsg("Файл загружен!"); loadProject(); onRefresh(); }
       else setUploadMsg(r2.error || "Ошибка подтверждения");
-    } catch { setUploadMsg("Ошибка загрузки"); }
+    } catch (e) { setUploadMsg("Ошибка загрузки: " + String(e)); }
     setUploading(false);
   };
 
@@ -537,8 +573,13 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
               style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
               <Icon name={uploading ? "Loader" : "Upload"} size={15} />
-              {uploading ? "Загрузка..." : "Выбрать файл (фото, PDF)"}
+              {uploading ? `Загрузка... ${uploadProgress}%` : "Выбрать файл (фото, PDF)"}
             </button>
+            {uploading && uploadProgress > 0 && (
+              <div className="mt-2 w-full rounded-full overflow-hidden" style={{ height: 4, background: "rgba(255,255,255,0.08)" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${uploadProgress}%`, background: "var(--neon-orange)" }} />
+              </div>
+            )}
             {uploadMsg && <div className="mt-2 text-sm" style={{ color: uploadMsg.includes("!") ? "var(--neon-green)" : "#ef4444" }}>{uploadMsg}</div>}
           </div>
 

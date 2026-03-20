@@ -3,10 +3,13 @@ import Icon from "@/components/ui/icon";
 import { PROJECTS_URL, FILE_TYPES, authFetch } from "./types";
 import type { Project, ProjectFile } from "./types";
 
+const CHUNK_SIZE = 3 * 1024 * 1024;
+
 export default function FileGallery({ project, token, canEdit }: { project: Project; token: string; canEdit: boolean }) {
   const [files, setFiles] = useState<ProjectFile[]>(project.files || []);
   const [activeType, setActiveType] = useState("render");
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -16,28 +19,41 @@ export default function FileGallery({ project, token, canEdit }: { project: Proj
   }, [project.id, token]);
 
   const uploadFile = async (file: File, ftype: string) => {
-    setUploading(true);
+    setUploading(true); setProgress(0);
     try {
-      // Шаг 1: получаем presigned URL от бэкенда
-      const res = await authFetch(`${PROJECTS_URL}?action=upload_file`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: ftype }),
-      }, token);
-      if (!res.presigned_url) { setUploading(false); return; }
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      let uploadId = "";
+      let parts: { PartNumber: number; ETag: string }[] = [];
+      let cdnUrl = "";
 
-      // Шаг 2: загружаем файл напрямую в S3 (без лимита размера)
-      await fetch(res.presigned_url, {
-        method: "PUT",
-        body: file,
-      });
+      for (let i = 0; i < totalChunks; i++) {
+        const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const arrayBuf = await slice.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
 
-      // Шаг 3: подтверждаем запись в БД
-      await authFetch(`${PROJECTS_URL}?action=confirm_upload`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: ftype, cdn_url: res.cdn_url }),
-      }, token);
+        const r = await authFetch(`${PROJECTS_URL}?action=upload_file`, {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: project.id, file_name: file.name, file_type: ftype,
+            chunk: b64, chunk_index: i, total_chunks: totalChunks,
+            upload_id: uploadId, parts,
+          }),
+        }, token);
 
-      load();
+        if (!r.ok) break;
+        if (r.upload_id) uploadId = r.upload_id;
+        if (r.parts) parts = r.parts;
+        setProgress(Math.round(((i + 1) / totalChunks) * 100));
+        if (r.done) { cdnUrl = r.cdn_url; break; }
+      }
+
+      if (cdnUrl) {
+        await authFetch(`${PROJECTS_URL}?action=confirm_upload`, {
+          method: "POST",
+          body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: ftype, cdn_url: cdnUrl }),
+        }, token);
+        load();
+      }
     } finally {
       setUploading(false);
     }
@@ -89,9 +105,14 @@ export default function FileGallery({ project, token, canEdit }: { project: Proj
             accept={FILE_TYPES.find(t => t.id === activeType)?.accept}
             onChange={e => Array.from(e.target.files || []).forEach(f => uploadFile(f, activeType))} />
           {uploading ? (
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-5 h-5 border-2 border-white/20 rounded-full animate-spin" style={{ borderTopColor: "var(--neon-cyan)" }} />
-              <span className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>Загрузка...</span>
+            <div>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <div className="w-5 h-5 border-2 border-white/20 rounded-full animate-spin" style={{ borderTopColor: "var(--neon-cyan)" }} />
+                <span className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>Загрузка... {progress}%</span>
+              </div>
+              <div className="w-full rounded-full overflow-hidden mx-auto" style={{ height: 3, background: "rgba(255,255,255,0.08)", maxWidth: 200 }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "var(--neon-cyan)" }} />
+              </div>
             </div>
           ) : (
             <>
