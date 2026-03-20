@@ -18,7 +18,12 @@ async function uploadFileChunked(
   for (let i = 0; i < totalChunks; i++) {
     const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
     const arrayBuf = await slice.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+    const bytes = new Uint8Array(arrayBuf);
+    let b64 = "";
+    for (let j = 0; j < bytes.length; j += 1024) {
+      b64 += String.fromCharCode(...bytes.subarray(j, j + 1024));
+    }
+    b64 = btoa(b64);
 
     const body: Record<string, unknown> = {
       project_id: projectId,
