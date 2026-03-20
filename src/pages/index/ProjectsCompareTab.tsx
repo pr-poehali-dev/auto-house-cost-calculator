@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { PROJECTS, formatPrice, formatNum, buildSmeta, type SmetaGroupData } from "./data";
 
@@ -90,6 +91,7 @@ interface ProjectsTabProps {
 }
 
 export function ProjectsTab({ selectedProject, setSelectedProject, compareList, toggleCompare }: ProjectsTabProps) {
+  const navigate = useNavigate();
   return (
     <div className="animate-fade-in">
       <div className="mb-8">
@@ -169,17 +171,25 @@ export function ProjectsTab({ selectedProject, setSelectedProject, compareList, 
                 ))}
               </div>
 
-              <div className="flex items-center justify-between pt-4"
-                style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                <div>
-                  <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Стоимость от</div>
-                  <div className="font-display font-bold text-xl" style={{ color: p.tagColor }}>
-                    {formatPrice(p.price)}
+              <div className="pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Стоимость от</div>
+                    <div className="font-display font-bold text-xl" style={{ color: p.tagColor }}>
+                      {formatPrice(p.price)}
+                    </div>
                   </div>
+                  <button className="px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:scale-105"
+                    style={{ background: `${p.tagColor}22`, color: p.tagColor, border: `1px solid ${p.tagColor}44` }}>
+                    Подробнее
+                  </button>
                 </div>
-                <button className="px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-                  style={{ background: `${p.tagColor}22`, color: p.tagColor, border: `1px solid ${p.tagColor}44` }}>
-                  Подробнее
+                <button
+                  onClick={e => { e.stopPropagation(); navigate(`/supplier?rfq=1&project=${encodeURIComponent(p.name)}&area=${p.area}&floors=${p.floors}`); }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02]"
+                  style={{ background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(168,85,247,0.1))", color: "#A855F7", border: "1px solid rgba(168,85,247,0.35)", boxShadow: "0 0 15px rgba(168,85,247,0.1)" }}>
+                  <Icon name="Truck" size={13} />
+                  Запросить КП у поставщиков
                 </button>
               </div>
 
