@@ -5,14 +5,7 @@ const MAT_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ec
 const AI_URL = "https://functions.poehali.dev/8ecbdbca-904c-4ffc-a3b2-3279170e95ee";
 
 function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res((r.result as string).split(",")[1]);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
-}
+
 
 interface Material {
   id: number; item_type: string; category: string; name: string; unit: string;
@@ -117,11 +110,26 @@ function SpecUploader({ token, projectId, specId, onImport }: {
   const upload = async (file: File) => {
     setUploading(true); setStatus("processing"); setResult([]); setErrorMsg("");
     try {
-      const file_data = await fileToBase64(file);
+      // Шаг 1: получаем presigned URL для загрузки в S3
+      const pre = await apiFetch(`${AI_URL}?action=presigned_spec`, {
+        method: "POST",
+        body: JSON.stringify({ file_name: file.name, project_id: projectId }),
+      }, token);
+      if (!pre.presigned_url) { setStatus("error"); setErrorMsg(pre.error || "Ошибка получения ссылки"); setUploading(false); return; }
+
+      // Шаг 2: загружаем файл напрямую в S3
+      await fetch(pre.presigned_url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": pre.content_type },
+      });
+
+      // Шаг 3: запускаем AI-разбор по s3_key
       const r = await apiFetch(`${AI_URL}?action=upload_spec`, {
         method: "POST",
-        body: JSON.stringify({ file_data, file_name: file.name, project_id: projectId, spec_id: specId }),
+        body: JSON.stringify({ s3_key: pre.s3_key, file_name: file.name, project_id: projectId, spec_id: specId }),
       }, token);
+
       if (r.status === "done" && r.items?.length) {
         setStatus("done");
         setResult(r.items);
@@ -129,7 +137,7 @@ function SpecUploader({ token, projectId, specId, onImport }: {
       } else if (r.error) {
         setStatus("error"); setErrorMsg(r.error);
       } else {
-        setStatus("error"); setErrorMsg("AI не распознал позиции в файле");
+        setStatus("error"); setErrorMsg("AI не распознал позиции в файле. Убедитесь что PDF содержит текст (не скан).");
       }
     } catch (e) {
       setStatus("error"); setErrorMsg(String(e));

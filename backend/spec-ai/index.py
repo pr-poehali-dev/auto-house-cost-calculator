@@ -169,25 +169,43 @@ def handler(event: dict, context) -> dict:
     if role not in ("architect","constructor","supply","engineer"):
         conn.close(); return resp({"error":"Нет доступа"}, 403)
 
+    # ── Получить presigned URL для загрузки файла спецификации напрямую в S3 ──
+    if method == "POST" and action == "presigned_spec":
+        project_id = body.get("project_id")
+        file_name = body.get("file_name","spec.pdf")
+        import re as _re
+        safe_name = _re.sub(r"[^\w.\-]", "_", file_name)
+        import mimetypes as _mt
+        ct = _mt.guess_type(safe_name)[0] or "application/octet-stream"
+        key = f"spec_uploads/{project_id or 'noproject'}/{safe_name}"
+        s3c = s3()
+        presigned = s3c.generate_presigned_url(
+            "put_object",
+            Params={"Bucket":"files","Key":key,"ContentType":ct},
+            ExpiresIn=600
+        )
+        conn.close()
+        return resp({"ok":True,"presigned_url":presigned,"s3_key":key,"cdn_url":cdn_url(key),"content_type":ct})
+
     # ── Загрузить файл спецификации и запустить AI-разбор ────────────────────
     if method == "POST" and action == "upload_spec":
         project_id = body.get("project_id")
         spec_id = body.get("spec_id")
-        file_data_b64 = body.get("file_data","")
         file_name = body.get("file_name","spec.pdf")
+        s3_key = body.get("s3_key","")  # ключ файла уже загруженного в S3
 
-        if not file_data_b64:
-            conn.close(); return resp({"error":"file_data обязателен"}, 400)
+        if not s3_key:
+            conn.close(); return resp({"error":"s3_key обязателен"}, 400)
 
-        # Сохраняем файл в S3
-        file_bytes = base64.b64decode(file_data_b64)
-        ext = file_name.rsplit(".",1)[-1].lower() if "." in file_name else "pdf"
-        ct_map = {"pdf":"application/pdf","xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                  "xls":"application/vnd.ms-excel","csv":"text/csv"}
-        ct = ct_map.get(ext,"application/octet-stream")
-        key = f"spec_uploads/{project_id or 'noproject'}/{file_name}"
-        s3().put_object(Bucket="files", Key=key, Body=file_bytes, ContentType=ct)
-        url = cdn_url(key)
+        # Читаем файл из S3
+        try:
+            s3c = s3()
+            obj = s3c.get_object(Bucket="files", Key=s3_key)
+            file_bytes = obj["Body"].read()
+        except Exception as e:
+            conn.close(); return resp({"error":f"Не удалось прочитать файл из S3: {e}"}, 500)
+
+        url = cdn_url(s3_key)
 
         # Сохраняем запись об upload
         cur = conn.cursor()
