@@ -131,8 +131,8 @@ def send_sms(phone, text):
     except: return False
 
 def row_rfq(r):
-    d = {"id":r[0],"title":r[1],"construction_address":r[2],"area":r[3],"floors":r[4],"house_type":r[5],"items":r[6],"deadline":str(r[7]) if r[7] else None,"status":r[8],"created_at":str(r[9])}
-    if len(r) > 10: d["proposals_count"] = r[10]
+    d = {"id":r[0],"title":r[1],"construction_address":r[2],"area":r[3],"floors":r[4],"house_type":r[5],"items":r[6],"deadline":str(r[7]) if r[7] else None,"status":r[8],"created_at":str(r[9]),"source_type":r[10] if len(r)>10 else "manual","source_project_id":r[11] if len(r)>11 else None,"customer_name":r[12] if len(r)>12 else "","customer_phone":r[13] if len(r)>13 else ""}
+    if len(r) > 14: d["proposals_count"] = r[14]
     return d
 
 def handler(event, context):
@@ -247,6 +247,7 @@ def handler(event, context):
             cur = conn.cursor()
             cur.execute(f"""
                 SELECT r.id,r.title,r.construction_address,r.area,r.floors,r.house_type,r.items,r.deadline,r.status,r.created_at,
+                  r.source_type,r.source_project_id,r.customer_name,r.customer_phone,
                   COUNT(p.id) as cnt
                 FROM {S}.rfq r LEFT JOIN {S}.proposals p ON p.rfq_id=r.id
                 GROUP BY r.id ORDER BY r.created_at DESC
@@ -259,7 +260,7 @@ def handler(event, context):
             rfq_id = body.get("rfq_id") or qs.get("rfq_id")
             if not rfq_id: conn.close(); return resp({"error":"rfq_id обязателен"}, 400)
             cur = conn.cursor()
-            cur.execute(f"SELECT id,title,construction_address,area,floors,house_type,items,deadline,status,created_at FROM {S}.rfq WHERE id=%s", (rfq_id,))
+            cur.execute(f"SELECT id,title,construction_address,area,floors,house_type,items,deadline,status,created_at,source_type,source_project_id,customer_name,customer_phone FROM {S}.rfq WHERE id=%s", (rfq_id,))
             r = cur.fetchone()
             if not r: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
             rfq = row_rfq(r)
@@ -280,11 +281,14 @@ def handler(event, context):
                 if not body.get(f): conn.close(); return resp({"error":f"Поле {f} обязательно"}, 400)
             cur = conn.cursor()
             cur.execute(f"""
-                INSERT INTO {S}.rfq (title,construction_address,area,floors,house_type,items,deadline,created_by)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                INSERT INTO {S}.rfq (title,construction_address,area,floors,house_type,items,deadline,created_by,
+                                     source_type,source_project_id,customer_name,customer_phone)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
             """, (body["title"],body["construction_address"],body.get("area"),body.get("floors"),
                   body.get("house_type",""),json.dumps(body["items"],ensure_ascii=False),
-                  body.get("deadline"),staff["id"]))
+                  body.get("deadline"),staff["id"],
+                  body.get("source_type","manual"),body.get("source_project_id"),
+                  body.get("customer_name",""),body.get("customer_phone","")))
             new_id = cur.fetchone()[0]
             conn.commit(); cur.close(); conn.close()
             return resp({"ok":True,"id":new_id})
