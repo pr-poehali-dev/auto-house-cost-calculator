@@ -261,6 +261,7 @@ def handler(event: dict, context) -> dict:
 
         # Извлекаем текст или изображения из файла
         extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name)
+        print(f"[spec-ai] file={file_name} size={len(file_bytes)} text_len={len(extracted_text)} images={len(images_b64)}")
 
         ai_items = []
         error_msg = ""
@@ -269,18 +270,19 @@ def handler(event: dict, context) -> dict:
         if not os.environ.get("DEEPSEEK_API_KEY"):
             error_msg = "DEEPSEEK_API_KEY не настроен — добавьте ключ в секреты проекта"
         elif extracted_text:
-            # Текстовый PDF — быстрый GPT-4o-mini
+            # Текстовый PDF — DeepSeek
+            print(f"[spec-ai] mode=text, calling DeepSeek, text preview: {extracted_text[:200]}")
             try:
                 ai_items = call_openai_text(extracted_text, mat_ctx)
+                print(f"[spec-ai] DeepSeek returned {len(ai_items)} items")
             except Exception as e:
                 error_msg = str(e)
+                print(f"[spec-ai] DeepSeek error: {e}")
         elif images_b64:
-            # Скан PDF — OCR через GPT-4o Vision
+            # Скан PDF — DeepSeek не поддерживает Vision, пробуем извлечь текст иначе
             mode = "ocr"
-            try:
-                ai_items = call_openai_vision(images_b64, mat_ctx)
-            except Exception as e:
-                error_msg = str(e)
+            print(f"[spec-ai] mode=ocr, {len(images_b64)} images — DeepSeek Vision не поддерживается")
+            error_msg = "Файл является сканом (изображением). Загрузите PDF с текстовым слоем или Excel-файл."
         else:
             error_msg = "Не удалось извлечь данные из файла. Убедитесь что файл не повреждён."
 
