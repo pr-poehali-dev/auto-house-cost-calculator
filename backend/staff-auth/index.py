@@ -162,6 +162,68 @@ def handler(event: dict, context) -> dict:
         conn.close()
         return json_resp({"ok": True})
 
+    # GET staff_list — список всех сотрудников (только для director/assistant)
+    if action == "staff_list":
+        if not token:
+            conn.close()
+            return json_resp({"error": "Не авторизован"}, 401)
+        me = get_staff_by_token(conn, token)
+        if not me:
+            conn.close()
+            return json_resp({"error": "Сессия истекла"}, 401)
+        if me["role_code"] not in ("director", "assistant", "admin"):
+            conn.close()
+            return json_resp({"error": "Доступ запрещён"}, 403)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, login, full_name, role_code, created_at FROM {SCHEMA}.staff ORDER BY role_code, full_name"
+        )
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        staff_list = [{"id": r[0], "login": r[1], "full_name": r[2], "role_code": r[3], "created_at": str(r[4])} for r in rows]
+        return json_resp({"staff": staff_list})
+
+    # POST impersonate — войти как другой сотрудник (только director/assistant)
+    if method == "POST" and action == "impersonate":
+        if not token:
+            conn.close()
+            return json_resp({"error": "Не авторизован"}, 401)
+        me = get_staff_by_token(conn, token)
+        if not me:
+            conn.close()
+            return json_resp({"error": "Сессия истекла"}, 401)
+        if me["role_code"] not in ("director", "assistant", "admin"):
+            conn.close()
+            return json_resp({"error": "Только руководитель может переключаться"}, 403)
+        target_id = body.get("staff_id")
+        if not target_id:
+            conn.close()
+            return json_resp({"error": "staff_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, login, full_name, role_code FROM {SCHEMA}.staff WHERE id = %s",
+            (target_id,)
+        )
+        target = cur.fetchone()
+        cur.close()
+        if not target:
+            conn.close()
+            return json_resp({"error": "Сотрудник не найден"}, 404)
+        # Создаём временный токен с пометкой impersonated (30 мин)
+        imp_token = secrets.token_hex(32)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=30)
+        cur2 = conn.cursor()
+        cur2.execute(
+            f"INSERT INTO {SCHEMA}.sessions (staff_id, token, expires_at) VALUES (%s, %s, %s)",
+            (target[0], imp_token, expires)
+        )
+        conn.commit(); cur2.close(); conn.close()
+        return json_resp({
+            "token": imp_token,
+            "staff": {"id": target[0], "login": target[1], "full_name": target[2], "role_code": target[3]},
+            "impersonated_by": {"id": me["id"], "full_name": me["full_name"], "token": token}
+        })
+
     # POST /change_password
     if method == "POST" and (action == "change_password" or path.endswith("/change_password")):
         if not token:

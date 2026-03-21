@@ -52,6 +52,8 @@ export const ROLE_LABELS: Record<string, string> = {
   build_manager: "Рук. строительства",
   admin: "Администратор",
   marketer: "Маркетолог",
+  director: "Руководитель",
+  assistant: "Помощник руководителя",
 };
 
 export const ROLE_COLORS: Record<string, string> = {
@@ -64,6 +66,8 @@ export const ROLE_COLORS: Record<string, string> = {
   build_manager: "#FB923C",
   admin: "#E11D48",
   marketer: "#34D399",
+  director: "#F8FAFC",
+  assistant: "#CBD5E1",
 };
 
 export const ROLE_ICONS: Record<string, string> = {
@@ -76,6 +80,8 @@ export const ROLE_ICONS: Record<string, string> = {
   build_manager: "HardHat",
   admin: "ShieldCheck",
   marketer: "TrendingUp",
+  director: "Crown",
+  assistant: "UserCheck",
 };
 
 export const ROLES = [
@@ -88,6 +94,8 @@ export const ROLES = [
   { code: "build_manager", label: "Руководитель строительства" },
   { code: "admin", label: "Администратор" },
   { code: "marketer", label: "Маркетолог" },
+  { code: "director", label: "Руководитель" },
+  { code: "assistant", label: "Помощник руководителя" },
 ];
 
 export function authFetch(url: string, opts: RequestInit = {}, token?: string) {

@@ -19,6 +19,19 @@
       "method": "GET",
       "path": "/",
       "expectedStatus": 401
+    },
+    {
+      "name": "Staff list without token",
+      "method": "GET",
+      "path": "/?action=staff_list",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Impersonate without token",
+      "method": "POST",
+      "path": "/?action=impersonate",
+      "body": {"staff_id": 1},
+      "expectedStatus": 401
     }
   ]
 }

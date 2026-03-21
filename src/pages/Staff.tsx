@@ -10,6 +10,7 @@ import LoginScreen from "./staff/LoginScreen";
 import DashboardShell from "./staff/DashboardShell";
 import SupplyCabinet from "./staff/SupplyCabinet";
 import MarketerCabinet from "./staff/MarketerCabinet";
+import DirectorCabinet from "./staff/DirectorCabinet";
 import { AUTH_URL, MATERIALS_URL, PROJECTS_URL, TOKEN_KEY, StaffUser, Material, HouseProject, ROLE_COLORS, authFetch } from "./staff/staff-types";
 
 // ─── Architect cabinet (legacy inline) ────────────────────────────────────────
@@ -522,6 +523,10 @@ export default function Staff() {
   const [checking, setChecking] = useState(true);
   const [globalTab, setGlobalTab] = useState<"main"|"ttk"|"settings">("main");
 
+  // Режим просмотра от имени сотрудника (impersonation)
+  const [directorToken, setDirectorToken] = useState<string | null>(null); // токен руководителя для возврата
+  const [directorUser, setDirectorUser] = useState<StaffUser | null>(null);
+
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY);
     if (!saved) { setChecking(false); return; }
@@ -537,6 +542,26 @@ export default function Staff() {
     if (token) await authFetch(AUTH_URL, { method: "POST", body: JSON.stringify({ action: "logout" }) }, token);
     localStorage.removeItem(TOKEN_KEY);
     setUser(null); setToken(null);
+    setDirectorToken(null); setDirectorUser(null);
+  };
+
+  // Войти в кабинет сотрудника от имени руководителя
+  const handleImpersonate = (impUser: StaffUser, impToken: string, origToken: string) => {
+    setDirectorUser(user); // сохраняем руководителя
+    setDirectorToken(origToken);
+    setUser(impUser);
+    setToken(impToken);
+    setGlobalTab("main");
+  };
+
+  // Вернуться в кабинет руководителя
+  const handleReturnToDirector = () => {
+    if (!directorUser || !directorToken) return;
+    setUser(directorUser);
+    setToken(directorToken);
+    setDirectorUser(null);
+    setDirectorToken(null);
+    setGlobalTab("main");
   };
 
   if (checking) {
@@ -562,12 +587,37 @@ export default function Staff() {
       case "supply": return <SupplyCabinet user={user} token={token} />;
       case "manager": return <SalesManager user={user} token={token} />;
       case "marketer": return <MarketerCabinet user={user} token={token} />;
+      case "director":
+      case "assistant":
+        return <DirectorCabinet user={user} token={token} onImpersonate={handleImpersonate} />;
       default: return <ReadonlyCabinet user={user} token={token} />;
     }
   };
 
   return (
     <DashboardShell user={user} token={token} onLogout={handleLogout} globalTab={globalTab} onGlobalTab={setGlobalTab}>
+      {/* Баннер режима просмотра */}
+      {directorToken && directorUser && (
+        <div className="mb-6 flex items-center justify-between px-5 py-3 rounded-2xl"
+          style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.3)" }}>
+          <div className="flex items-center gap-3">
+            <Icon name="Eye" size={16} style={{ color: "#FBBF24" }} />
+            <div>
+              <span className="text-sm font-semibold text-white">Режим просмотра: </span>
+              <span className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>
+                вы смотрите кабинет {user.full_name}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={handleReturnToDirector}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{ background: "#FBBF24", color: "#0a0d14" }}>
+            <Icon name="ArrowLeft" size={14} />
+            Вернуться
+          </button>
+        </div>
+      )}
       {renderCabinet()}
     </DashboardShell>
   );
