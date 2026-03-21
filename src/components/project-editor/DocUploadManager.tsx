@@ -61,53 +61,67 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
 
   const upload = async (file: File) => {
     setUploading(true);
-    setUploadProgress("Читаю файл...");
+    setUploadProgress("Загружаю файл...");
+
+    const CHUNK_SIZE = 512 * 1024;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploadSessId = "";
+    let finalR: Record<string, unknown> | null = null;
+
     try {
-      // Читаем файл как base64
-      const arrayBuf = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i += 1024) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + 1024));
+      for (let i = 0; i < totalChunks; i++) {
+        const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const arrayBuf = await slice.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuf);
+        let binary = "";
+        for (let j = 0; j < bytes.length; j += 1024) {
+          binary += String.fromCharCode(...bytes.subarray(j, j + 1024));
+        }
+        const chunk_b64 = btoa(binary);
+        const pct = Math.round(((i + 1) / totalChunks) * 80);
+        setUploadProgress(`Загружаю файл... ${pct}%`);
+
+        const r = await apiFetch(`${AI_URL}?action=upload_doc_chunk`, {
+          method: "POST",
+          body: JSON.stringify({
+            chunk: chunk_b64,
+            chunk_index: i,
+            total_chunks: totalChunks,
+            upload_id: uploadSessId,
+            file_name: file.name,
+            project_id: projectId,
+            spec_id: specId,
+          }),
+        }, token);
+
+        if (!r.ok) { setUploadProgress(""); setUploading(false); return; }
+        if (r.upload_id && !uploadSessId) uploadSessId = String(r.upload_id);
+        if (r.done) { finalR = r; break; }
       }
-      const file_b64 = btoa(binary);
-
-      setUploadProgress("AI классифицирует и анализирует документ постранично...");
-
-      const r = await apiFetch(`${AI_URL}?action=upload_doc`, {
-        method: "POST",
-        body: JSON.stringify({
-          file_b64,
-          file_name: file.name,
-          project_id: projectId,
-          spec_id: specId,
-          page_by_page: true,
-        }),
-      }, token);
 
       setUploadProgress("");
       setUploading(false);
       await loadUploads();
 
-      if (r.ok && r.upload_id) {
+      if (finalR && finalR.upload_id) {
         const newDoc: UploadedDoc = {
-          id: r.upload_id,
+          id: Number(finalR.upload_id),
           file_name: file.name,
-          file_url: r.file_url,
-          status: r.status,
-          doc_category: r.doc_category || "other",
-          doc_category_label: r.doc_category_label || "Прочее",
-          page_count: r.pages_count || null,
+          file_url: String(finalR.file_url || ""),
+          status: String(finalR.status || "done"),
+          doc_category: String(finalR.doc_category || "other"),
+          doc_category_label: String(finalR.doc_category_label || "Прочее"),
+          page_count: finalR.pages_count ? Number(finalR.pages_count) : null,
           created_at: new Date().toISOString(),
           by: "",
         };
         setActiveDoc(newDoc);
-        if (r.pages?.length) {
-          setPages(r.pages);
+        const pages = (finalR.pages as PageData[]) || [];
+        if (pages.length) {
+          setPages(pages);
           setCurrentPage(1);
-          // Выделяем все позиции по умолчанию
           const allKeys = new Set<string>();
-          r.pages.forEach((p: PageData) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
+          pages.forEach((p) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
           setSelectedItems(allKeys);
         }
       }

@@ -321,42 +321,61 @@ def handler(event: dict, context) -> dict:
     if role not in ("architect","constructor","supply","engineer","admin","manager"):
         conn.close(); return resp({"error":"Нет доступа"}, 403)
 
-    # ── Загрузка файла base64 напрямую через бэкенд (без presigned URL) ─────────
-    if method == "POST" and action == "upload_doc":
+    # ── Загрузка файла чанками (chunk_index / total_chunks) ──────────────────
+    if method == "POST" and action == "upload_doc_chunk":
         project_id = body.get("project_id")
         spec_id = body.get("spec_id")
         file_name = body.get("file_name", "doc.pdf")
-        file_b64 = body.get("file_b64", "")
-        page_by_page = body.get("page_by_page", True)
+        chunk_b64 = body.get("chunk", "")
+        chunk_index = int(body.get("chunk_index", 0))
+        total_chunks = int(body.get("total_chunks", 1))
+        upload_sess = body.get("upload_id", "")
 
-        if not file_b64:
-            conn.close(); return resp({"error": "file_b64 обязателен"}, 400)
+        if not chunk_b64:
+            conn.close(); return resp({"error": "chunk обязателен"}, 400)
 
-        try:
-            file_bytes = base64.b64decode(file_b64)
-        except Exception as e:
-            conn.close(); return resp({"error": f"Ошибка декодирования файла: {e}"}, 400)
-
-        # Сохраняем в S3
+        import mimetypes as _mt
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
-        key = f"spec_uploads/{project_id or 'noproject'}/{safe_name}"
+        ct = _mt.guess_type(safe_name)[0] or "application/octet-stream"
+        final_key = f"spec_uploads/{project_id or 'noproject'}/{safe_name}"
+        s3c = s3()
+
         try:
-            import mimetypes as _mt
-            ct = _mt.guess_type(safe_name)[0] or "application/octet-stream"
-            s3c = s3()
-            s3c.put_object(Bucket="files", Key=key, Body=file_bytes, ContentType=ct)
+            if total_chunks == 1:
+                file_bytes = base64.b64decode(chunk_b64)
+                s3c.put_object(Bucket="files", Key=final_key, Body=file_bytes, ContentType=ct)
+            else:
+                if not upload_sess:
+                    upload_sess = str(uuid.uuid4())
+                chunk_key = f"_tmp/{upload_sess}/chunk_{chunk_index:05d}"
+                s3c.put_object(Bucket="files", Key=chunk_key, Body=base64.b64decode(chunk_b64), ContentType="application/octet-stream")
+
+                if chunk_index < total_chunks - 1:
+                    conn.close()
+                    return resp({"ok": True, "done": False, "upload_id": upload_sess})
+
+                # Последний чанк — собираем всё
+                all_bytes = b""
+                for i in range(total_chunks):
+                    obj = s3c.get_object(Bucket="files", Key=f"_tmp/{upload_sess}/chunk_{i:05d}")
+                    all_bytes += obj["Body"].read()
+                file_bytes = all_bytes
+                s3c.put_object(Bucket="files", Key=final_key, Body=file_bytes, ContentType=ct)
+                for i in range(total_chunks):
+                    try: s3c.delete_object(Bucket="files", Key=f"_tmp/{upload_sess}/chunk_{i:05d}")
+                    except: pass
         except Exception as e:
-            conn.close(); return resp({"error": f"Ошибка сохранения в S3: {e}"}, 500)
+            conn.close(); return resp({"error": f"S3 ошибка: {e}"}, 500)
 
-        url = cdn_url(key)
+        url = cdn_url(final_key)
 
-        # Загружаем базу материалов для контекста
+        # Сохраняем запись и запускаем AI-анализ
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO {S}.spec_uploads (project_id,spec_id,file_name,file_url,status,uploaded_by) "
             f"VALUES (%s,%s,%s,%s,'processing',%s) RETURNING id",
             (project_id, spec_id, file_name, url, staff["id"]))
-        upload_id = cur.fetchone()[0]
+        db_upload_id = cur.fetchone()[0]
         conn.commit()
 
         cur.execute(f"SELECT name,unit,price_per_unit,category FROM {S}.materials WHERE is_active=TRUE ORDER BY category,name")
@@ -364,7 +383,7 @@ def handler(event: dict, context) -> dict:
         mat_ctx = "\n".join([f"{r[3]} | {r[0]} | {r[1]} | {r[2]}₽" for r in mats[:150]])
 
         extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name)
-        print(f"[spec-ai/upload_doc] file={file_name} size={len(file_bytes)} text={len(extracted_text)} images={len(images_b64)}")
+        print(f"[spec-ai/chunk] file={file_name} size={len(file_bytes)} text={len(extracted_text)} images={len(images_b64)}")
 
         ai_items = []
         error_msg = ""
@@ -379,39 +398,26 @@ def handler(event: dict, context) -> dict:
                 doc_info = classify_document(extracted_text)
             except Exception as e:
                 print(f"[spec-ai] classify error: {e}")
-
-            if page_by_page:
-                mode = "page_by_page"
-                pages = split_text_into_pages(extracted_text)
-                print(f"[spec-ai] page_by_page: {len(pages)} pages")
-                for i, page_text in enumerate(pages):
-                    page_items = analyze_page_text(page_text, i + 1, mat_ctx)
-                    pages_data.append({
-                        "page": i + 1,
-                        "text_preview": page_text[:500],
-                        "items": page_items,
-                        "items_count": len(page_items)
-                    })
-                    ai_items.extend(page_items)
-                seen = set()
-                unique = []
-                for item in ai_items:
-                    k = f"{item.get('section','')}|{item.get('name','')}".lower()
-                    if k not in seen:
-                        seen.add(k); unique.append(item)
-                ai_items = unique
-            else:
-                try:
-                    ai_items = call_openai_text(extracted_text, mat_ctx)
-                except Exception as e:
-                    error_msg = str(e)
+            mode = "page_by_page"
+            pages = split_text_into_pages(extracted_text)
+            for i, page_text in enumerate(pages):
+                page_items = analyze_page_text(page_text, i + 1, mat_ctx)
+                pages_data.append({"page": i+1, "text_preview": page_text[:500], "items": page_items, "items_count": len(page_items)})
+                ai_items.extend(page_items)
+            seen = set()
+            unique = []
+            for item in ai_items:
+                k = f"{item.get('section','')}|{item.get('name','')}".lower()
+                if k not in seen:
+                    seen.add(k); unique.append(item)
+            ai_items = unique
         elif images_b64:
             mode = "ocr"
             try:
                 ai_items = call_openai_vision(images_b64, mat_ctx)
-                ocr_text = ocr_images_to_text(images_b64[:2])
-                if ocr_text:
-                    doc_info = classify_document(ocr_text)
+                ocr_txt = ocr_images_to_text(images_b64[:2])
+                if ocr_txt:
+                    doc_info = classify_document(ocr_txt)
             except Exception as e:
                 error_msg = str(e)
         else:
@@ -424,12 +430,13 @@ def handler(event: dict, context) -> dict:
             (status, json.dumps(ai_items, ensure_ascii=False), error_msg,
              doc_info.get("category","other"), len(pages_data) or None,
              json.dumps(pages_data, ensure_ascii=False) if pages_data else None,
-             upload_id))
+             db_upload_id))
         conn.commit(); cur.close(); conn.close()
 
         return resp({
             "ok": True,
-            "upload_id": upload_id,
+            "upload_id": db_upload_id,
+            "done": True,
             "file_url": url,
             "status": status,
             "items": ai_items,
