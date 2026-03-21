@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+import PlanSketch, { type SketchResult } from "./PlanSketch";
 
 // ─── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -61,23 +62,26 @@ const SECTIONS: CalcSection[] = [
 // ─── Формулы расчёта объёмов ─────────────────────────────────────────────────
 
 function calcFoundation(p: Record<string, number>): CalcVolume[] {
-  const outerPerimeter = 2 * ((p.length || 0) + (p.width || 0));
-  // Внутренние несущие стены: кол-во рядов вдоль длины и ширины × соответствующий размер
-  const innerLen = (p.inner_rows_along_width  || 0) * (p.length || 0);
-  const innerWid = (p.inner_rows_along_length || 0) * (p.width  || 0);
-  const totalPerimeter = outerPerimeter + innerLen + innerWid;
-  const thickM  = (p.thickness || 0) / 1000;                // мм → м
-  const volume  = totalPerimeter * (p.height || 0) * thickM;
-  const area    = totalPerimeter * (p.height || 0);
+  // Если есть данные с чертежа — используем их
+  const hasSketch = (p.sketch_total || 0) > 0;
+  const outerPerimeter = hasSketch ? (p.sketch_outer || 0) : 2 * ((p.length || 0) + (p.width || 0));
+  const innerTotal     = hasSketch ? (p.sketch_inner || 0) : 0;
+  const totalPerimeter = hasSketch ? (p.sketch_total || 0) : outerPerimeter;
+  const source         = hasSketch ? "из чертежа" : "2×(L+W)";
+
+  const thickM   = (p.thickness || 0) / 1000;  // мм → м
+  const volume   = totalPerimeter * (p.height || 0) * thickM;
+  const area     = totalPerimeter * (p.height || 0);
   const armature = volume * 80;  // кг/м³
-  const formwork = area * 2;     // с двух сторон (внутренние ленты тоже двусторонние)
+  const formwork = area * 2;
+
   return [
-    { label: "Периметр наружных стен", value: +outerPerimeter.toFixed(1), unit: "п.м", formula: "2×(L+W)" },
-    { label: "Длина внутренних лент",  value: +(innerLen + innerWid).toFixed(1), unit: "п.м", formula: `${p.inner_rows_along_width||0} рядов×L + ${p.inner_rows_along_length||0} рядов×W` },
-    { label: "Общая длина ленты",      value: +totalPerimeter.toFixed(1), unit: "п.м", formula: "наружные + внутренние" },
+    { label: "Периметр наружных стен", value: +outerPerimeter.toFixed(2), unit: "п.м", formula: source },
+    { label: "Внутренние несущие",     value: +innerTotal.toFixed(2),     unit: "п.м", formula: hasSketch ? "из чертежа" : "не задано" },
+    { label: "Общая длина ленты",      value: +totalPerimeter.toFixed(2), unit: "п.м", formula: "наружные + внутренние" },
     { label: "Объём бетона",           value: +volume.toFixed(2),         unit: "м³",  formula: `${totalPerimeter.toFixed(1)}п.м × ${p.height||0}м × ${thickM}м` },
     { label: "Площадь опалубки",       value: +formwork.toFixed(1),       unit: "м²",  formula: "площадь ленты × 2 стороны" },
-    { label: "Арматура А400 (ор.)",    value: +armature.toFixed(0),       unit: "кг",  formula: `${volume.toFixed(2)}м³ × 80 кг/м³` },
+    { label: "Арматура А400 (ор.)",    value: +armature.toFixed(0),       unit: "кг",  formula: `объём × 80 кг/м³` },
   ];
 }
 
@@ -248,6 +252,24 @@ export default function GeometryCalc({ token, projectArea, projectFloors, onBomR
   const [selectedTtk, setSelectedTtk] = useState<Record<string, number>>({});
   const [generating, setGenerating] = useState(false);
   const [bom, setBom] = useState<BomItem[]>([]);
+  // Режим ввода для фундамента: manual | sketch
+  const [foundationMode, setFoundationMode] = useState<"manual" | "sketch">("manual");
+  const [sketchResult, setSketchResult] = useState<SketchResult | null>(null);
+
+  const handleSketchResult = useCallback((r: SketchResult) => {
+    setSketchResult(r);
+    // Синхронизируем длину ленты в ручные параметры (totalLength → используется как «периметр»)
+    // чтобы ТТК расчёт тоже работал
+    setParams(prev => ({
+      ...prev,
+      foundation: {
+        ...prev.foundation,
+        sketch_total: r.totalLength,
+        sketch_outer: r.outerPerimeter,
+        sketch_inner: r.innerTotal,
+      },
+    }));
+  }, []);
 
   useEffect(() => {
     fetch(`${TTK_URL}?action=list`)
@@ -350,14 +372,68 @@ export default function GeometryCalc({ token, projectArea, projectFloors, onBomR
         })}
       </div>
 
+      {/* Чертёж фундамента на canvas */}
+      {activeSection === "foundation" && foundationMode === "sketch" && (
+        <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,107,26,0.2)" }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Icon name="PenLine" size={15} style={{ color: "#FF6B1A" }} />
+              <span className="font-semibold text-white text-sm">Чертёж плана фундамента</span>
+            </div>
+            <button onClick={() => setFoundationMode("manual")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+              style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <Icon name="FormInput" size={12} /> Ручной ввод
+            </button>
+          </div>
+          <PlanSketch
+            scale={0.05}
+            onResult={handleSketchResult}
+          />
+          {sketchResult && (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[
+                { label: "Наружный периметр", value: sketchResult.outerPerimeter, color: "#00D4FF" },
+                { label: "Внутренние стены",  value: sketchResult.innerTotal,     color: "#FF6B1A" },
+                { label: "Итого лент",        value: sketchResult.totalLength,    color: "var(--neon-green)" },
+              ].map(s => (
+                <div key={s.label} className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${s.color}30` }}>
+                  <div className="text-lg font-bold" style={{ color: s.color }}>{s.value.toFixed(2)}</div>
+                  <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{s.label}, п.м</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Левая панель — ввод параметров */}
         <div className="rounded-2xl p-5 space-y-4" style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${section.color}30` }}>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${section.color}20` }}>
-              <Icon name={section.icon} size={14} style={{ color: section.color }} />
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${section.color}20` }}>
+                <Icon name={section.icon} size={14} style={{ color: section.color }} />
+              </div>
+              <span className="font-semibold text-white text-sm">{section.label} — параметры</span>
             </div>
-            <span className="font-semibold text-white text-sm">{section.label} — параметры</span>
+            {/* Переключатель режима только для фундамента */}
+            {activeSection === "foundation" && (
+              <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
+                {(["manual", "sketch"] as const).map(m => (
+                  <button key={m} onClick={() => setFoundationMode(m)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-all"
+                    style={{
+                      background: foundationMode === m ? "rgba(255,107,26,0.2)" : "transparent",
+                      color: foundationMode === m ? "#FF6B1A" : "rgba(255,255,255,0.4)",
+                      borderRight: m === "manual" ? "1px solid rgba(255,255,255,0.1)" : "none",
+                    }}>
+                    <Icon name={m === "manual" ? "FormInput" : "PenLine"} size={11} />
+                    {m === "manual" ? "Вручную" : "Чертёж"}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
