@@ -4,7 +4,7 @@ import Icon from "@/components/ui/icon";
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
 const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
-const CHUNK_SIZE = 3 * 1024 * 1024; // 3МБ бинарных → ~4МБ base64, укладывается в лимит платформы
+const CHUNK_SIZE = 512 * 1024; // 512КБ бинарных → ~700КБ base64, гарантированно в лимите платформы
 
 async function uploadFileChunked(
   file: File,
