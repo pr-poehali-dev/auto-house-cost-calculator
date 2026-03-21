@@ -301,57 +301,58 @@ def handler(event: dict, context) -> dict:
     if action == "upload_file":
         if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)
         pid = body.get("project_id")
-        file_name = body.get("file_name","file.pdf")
+        file_name = body.get("file_name","file.bin")
         file_type = body.get("file_type","render")
-        chunk_b64 = body.get("chunk","")        # base64 текущего чанка
-        chunk_index = body.get("chunk_index",0) # номер чанка (0-based)
-        total_chunks = body.get("total_chunks",1)
-        upload_id_s3 = body.get("upload_id","") # multipart upload id
-        parts = body.get("parts",[])             # [{PartNumber, ETag}]
+        chunk_b64 = body.get("chunk","")
+        chunk_index = int(body.get("chunk_index", 0))
+        total_chunks = int(body.get("total_chunks", 1))
+        upload_id = body.get("upload_id","")  # случайный ID сессии загрузки
 
         if not pid or not file_name: conn.close(); return resp({"error":"project_id и file_name обязательны"}, 400)
-        import re as _re
-        safe_name = _re.sub(r"[^\w.\-]", "_", file_name)
+        safe_name = re.sub(r"[^\w.\-]", "_", file_name)
         ct = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
-        key = f"projects/{pid}/{file_type}/{safe_name}"
+        final_key = f"projects/{pid}/{file_type}/{safe_name}"
         s3c = s3_client()
 
         try:
             if total_chunks == 1:
-                # Маленький файл — загружаем целиком
+                # Маленький файл — загружаем целиком напрямую
                 file_bytes = base64.b64decode(chunk_b64)
-                s3c.put_object(Bucket="files", Key=key, Body=file_bytes, ContentType=ct)
-                file_url = cdn_url(key)
+                s3c.put_object(Bucket="files", Key=final_key, Body=file_bytes, ContentType=ct)
                 conn.close()
-                return resp({"ok":True,"done":True,"cdn_url":file_url,"key":key})
+                return resp({"ok":True,"done":True,"cdn_url":cdn_url(final_key),"key":final_key})
 
-            elif chunk_index == 0:
-                # Первый чанк — инициируем multipart
-                mp = s3c.create_multipart_upload(Bucket="files", Key=key, ContentType=ct)
-                mid = mp["UploadId"]
-                chunk_bytes = base64.b64decode(chunk_b64)
-                part = s3c.upload_part(Bucket="files", Key=key, UploadId=mid, PartNumber=1, Body=chunk_bytes)
-                conn.close()
-                return resp({"ok":True,"done":False,"upload_id":mid,"parts":[{"PartNumber":1,"ETag":part["ETag"]}]})
+            # Многочастная загрузка: каждый чанк сохраняем как отдельный объект во временную папку
+            if not upload_id:
+                import uuid
+                upload_id = str(uuid.uuid4())
 
-            elif chunk_index < total_chunks - 1:
-                # Промежуточный чанк
-                chunk_bytes = base64.b64decode(chunk_b64)
-                part = s3c.upload_part(Bucket="files", Key=key, UploadId=upload_id_s3, PartNumber=chunk_index+1, Body=chunk_bytes)
-                new_parts = parts + [{"PartNumber":chunk_index+1,"ETag":part["ETag"]}]
-                conn.close()
-                return resp({"ok":True,"done":False,"upload_id":upload_id_s3,"parts":new_parts})
+            chunk_key = f"_tmp/{upload_id}/chunk_{chunk_index:05d}"
+            chunk_bytes = base64.b64decode(chunk_b64)
+            s3c.put_object(Bucket="files", Key=chunk_key, Body=chunk_bytes, ContentType="application/octet-stream")
 
-            else:
-                # Последний чанк — завершаем multipart
-                chunk_bytes = base64.b64decode(chunk_b64)
-                part = s3c.upload_part(Bucket="files", Key=key, UploadId=upload_id_s3, PartNumber=chunk_index+1, Body=chunk_bytes)
-                all_parts = parts + [{"PartNumber":chunk_index+1,"ETag":part["ETag"]}]
-                s3c.complete_multipart_upload(Bucket="files", Key=key, UploadId=upload_id_s3,
-                    MultipartUpload={"Parts": all_parts})
-                file_url = cdn_url(key)
+            if chunk_index < total_chunks - 1:
+                # Не последний — просто подтверждаем получение
                 conn.close()
-                return resp({"ok":True,"done":True,"cdn_url":file_url,"key":key})
+                return resp({"ok":True,"done":False,"upload_id":upload_id})
+
+            # Последний чанк — собираем все части в один файл
+            all_bytes = b""
+            for i in range(total_chunks):
+                part_key = f"_tmp/{upload_id}/chunk_{i:05d}"
+                obj = s3c.get_object(Bucket="files", Key=part_key)
+                all_bytes += obj["Body"].read()
+
+            # Загружаем итоговый файл
+            s3c.put_object(Bucket="files", Key=final_key, Body=all_bytes, ContentType=ct)
+
+            # Чистим временные чанки
+            for i in range(total_chunks):
+                try: s3c.delete_object(Bucket="files", Key=f"_tmp/{upload_id}/chunk_{i:05d}")
+                except: pass
+
+            conn.close()
+            return resp({"ok":True,"done":True,"cdn_url":cdn_url(final_key),"key":final_key})
 
         except Exception as e:
             conn.close(); return resp({"error":f"S3 ошибка: {str(e)}"}, 500)

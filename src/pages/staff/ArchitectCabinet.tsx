@@ -4,7 +4,7 @@ import Icon from "@/components/ui/icon";
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
 const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
-const CHUNK_SIZE = 1 * 1024 * 1024; // 1МБ на чанк (base64 даёт ~1.33МБ тела)
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3МБ бинарных → ~4МБ base64, укладывается в лимит платформы
 
 async function uploadFileChunked(
   file: File,
@@ -14,8 +14,8 @@ async function uploadFileChunked(
   onProgress?: (pct: number) => void
 ): Promise<{ cdn_url: string; key: string } | null> {
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-  let uploadId = "";
-  let parts: { PartNumber: number; ETag: string }[] = [];
+  // Генерируем уникальный ID сессии загрузки один раз
+  const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (let i = 0; i < totalChunks; i++) {
     const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
@@ -27,25 +27,20 @@ async function uploadFileChunked(
     }
     b64 = btoa(b64);
 
-    const body: Record<string, unknown> = {
-      project_id: projectId,
-      file_name: file.name,
-      file_type: fileType,
-      chunk: b64,
-      chunk_index: i,
-      total_chunks: totalChunks,
-      upload_id: uploadId,
-      parts,
-    };
-
     const r = await apiFetch(`${PROJECTS_URL}?action=upload_file`, {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        project_id: projectId,
+        file_name: file.name,
+        file_type: fileType,
+        chunk: b64,
+        chunk_index: i,
+        total_chunks: totalChunks,
+        upload_id: uploadId,
+      }),
     }, token);
 
     if (!r.ok) return null;
-    if (r.upload_id) uploadId = r.upload_id;
-    if (r.parts) parts = r.parts;
     onProgress?.(Math.round(((i + 1) / totalChunks) * 100));
     if (r.done) return { cdn_url: r.cdn_url, key: r.key };
   }
