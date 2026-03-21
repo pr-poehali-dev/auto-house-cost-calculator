@@ -188,6 +188,7 @@ function UploadZone({
 export default function CompanySettings({ token }: CompanySettingsProps) {
   const [tab, setTab] = useState<"details" | "images" | "templates">("details");
   const [form, setForm] = useState<CompanySettingsData>({});
+  const [formLoading, setFormLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [templates, setTemplates] = useState<ContractTemplate[]>([]);
@@ -202,12 +203,15 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
   });
   const tplFileRef = useRef<HTMLInputElement>(null);
   const [tplUploading, setTplUploading] = useState(false);
+  const [tplUploadError, setTplUploadError] = useState("");
 
   // load settings
   useEffect(() => {
+    setFormLoading(true);
     apiFetch(`${COMPANY_URL}?action=settings`).then((r) => {
       if (r.settings) setForm(r.settings);
-    });
+      setFormLoading(false);
+    }).catch(() => setFormLoading(false));
   }, []);
 
   // load templates
@@ -248,18 +252,25 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
 
   const uploadTplFile = async (file: File) => {
     setTplUploading(true);
-    const res = await apiFetch(
-      `${COMPANY_URL}?action=template_presigned`,
-      { method: "POST", body: JSON.stringify({ file_name: file.name }) },
-      token
-    );
-    if (!res.error) {
-      await fetch(res.presigned_url, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": "application/octet-stream" },
-      });
-      setNewTpl((p) => ({ ...p, file_name: file.name, file_url: res.cdn_url }));
+    setTplUploadError("");
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      const res = await apiFetch(
+        `${COMPANY_URL}?action=upload_template_file`,
+        { method: "POST", body: JSON.stringify({ file_name: file.name, file_base64: base64 }) },
+        token
+      );
+      if (res.error) {
+        setTplUploadError(res.error);
+      } else {
+        setNewTpl((p) => ({ ...p, file_name: file.name, file_url: res.cdn_url }));
+      }
+    } catch {
+      setTplUploadError("Ошибка при загрузке файла");
     }
     setTplUploading(false);
   };
@@ -319,9 +330,17 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
       {/* ── Tab: Реквизиты ── */}
       {tab === "details" && (
         <div
-          className="rounded-2xl p-6 space-y-6"
+          className="rounded-2xl p-6 space-y-6 relative"
           style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
         >
+          {formLoading && (
+            <div className="absolute inset-0 rounded-2xl flex items-center justify-center z-10" style={{ background: "rgba(17,21,32,0.7)" }}>
+              <div className="flex flex-col items-center gap-3">
+                <Icon name="Loader2" size={32} className="animate-spin" style={{ color: "#FBBF24" }} />
+                <span className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>Загрузка реквизитов...</span>
+              </div>
+            </div>
+          )}
           {/* Наименование */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={LABEL_STYLE}>
@@ -706,6 +725,9 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
                     )}
                     {tplUploading ? "Загрузка..." : "Загрузить файл"}
                   </button>
+                )}
+                {tplUploadError && (
+                  <p className="text-xs mt-1.5" style={{ color: "#ef4444" }}>{tplUploadError}</p>
                 )}
                 <input
                   ref={tplFileRef}

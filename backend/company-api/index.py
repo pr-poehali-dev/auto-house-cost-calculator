@@ -217,22 +217,25 @@ def handler(event: dict, context) -> dict:
             return resp({"ok": True, "id": rid})
 
         # ------------------------------------------------------------------ #
-        # POST template_presigned                                             #
+        # POST upload_template_file  — base64 upload                        #
         # ------------------------------------------------------------------ #
-        if method == "POST" and action == "template_presigned":
+        if method == "POST" and action == "upload_template_file":
+            import base64
             file_name = body.get("file_name", "")
-            if not file_name:
-                return resp({"error": "file_name обязателен"}, 400)
+            file_b64 = body.get("file_base64", "")
+            if not file_name or not file_b64:
+                return resp({"error": "file_name и file_base64 обязательны"}, 400)
             safe_name = re.sub(r"[^\w.\-]", "_", file_name)
             key = f"company/templates/{safe_name}"
-            bucket = "bucket"
-            presigned = s3().generate_presigned_url(
-                "put_object",
-                Params={"Bucket": bucket, "Key": key, "ContentType": "application/octet-stream"},
-                ExpiresIn=600,
+            file_bytes = base64.b64decode(file_b64)
+            s3().put_object(
+                Bucket="bucket",
+                Key=key,
+                Body=file_bytes,
+                ContentType="application/octet-stream",
             )
             url = cdn_url(key)
-            return resp({"presigned_url": presigned, "cdn_url": url, "key": key})
+            return resp({"ok": True, "cdn_url": url, "file_name": file_name})
 
         # ------------------------------------------------------------------ #
         # DELETE delete_template                                              #
