@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
 import NormDocuments from "@/components/project-editor/NormDocuments";
@@ -1791,8 +1792,8 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
       </div>
 
       {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
+      {showForm && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
           <div className="rounded-2xl w-full max-w-4xl my-4 shadow-2xl" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.25)" }}>
           {/* Sticky header */}
           <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 rounded-t-2xl" style={{ background: "var(--card-bg)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -2082,7 +2083,7 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
           </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Projects grid */}
       {loading ? (
