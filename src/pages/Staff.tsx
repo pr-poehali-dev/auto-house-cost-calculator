@@ -1,320 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
 import ProjectPanel from "@/components/ProjectEditor";
 import ArchitectCabinetNew from "./staff/ArchitectCabinet";
 import MaterialsDB from "./staff/MaterialsDB";
 import TechCardsDB from "./staff/TechCardsDB";
 import CompanySettings from "./staff/CompanySettings";
 import SalesManager from "./staff/SalesManager";
+import LoginScreen from "./staff/LoginScreen";
+import DashboardShell from "./staff/DashboardShell";
+import SupplyCabinet from "./staff/SupplyCabinet";
+import { AUTH_URL, MATERIALS_URL, PROJECTS_URL, TOKEN_KEY, StaffUser, Material, HouseProject, ROLE_COLORS, authFetch } from "./staff/staff-types";
 
-const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
-const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
-const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
-const SUPPLIER_API = "https://functions.poehali.dev/0864e1a5-8fce-4370-a525-80d6700b50ee";
-const SUPPLY_OPS = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
-
-const TOKEN_KEY = "staff_token";
-
-interface StaffUser {
-  id: number;
-  login: string;
-  full_name: string;
-  role_code: string;
-}
-
-interface Material {
-  id: number;
-  category: string;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-  qty_formula: string;
-  sort_order: number;
-  is_active: boolean;
-  updated_at: string;
-}
-
-interface HouseProject {
-  id: number;
-  name: string;
-  type: string;
-  area: number;
-  floors: number;
-  rooms: number;
-  price: number;
-  tag: string;
-  tag_color: string;
-  description: string;
-  features: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  architect: "Архитектор",
-  constructor: "Конструктор",
-  engineer: "Инженер",
-  lawyer: "Юрист",
-  supply: "Снабженец",
-  manager: "Менеджер",
-  build_manager: "Рук. строительства",
-  admin: "Администратор",
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  architect: "#00D4FF",
-  constructor: "#FF6B1A",
-  engineer: "#00FF88",
-  lawyer: "#A855F7",
-  supply: "#FBBF24",
-  manager: "#F472B6",
-  build_manager: "#FB923C",
-  admin: "#E11D48",
-};
-
-const ROLE_ICONS: Record<string, string> = {
-  architect: "Pencil",
-  constructor: "Wrench",
-  engineer: "Settings",
-  lawyer: "Scale",
-  supply: "ShoppingCart",
-  manager: "Phone",
-  build_manager: "HardHat",
-  admin: "ShieldCheck",
-};
-
-function authFetch(url: string, opts: RequestInit = {}, token?: string) {
-  return fetch(url, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { "X-Auth-Token": token } : {}),
-      ...(opts.headers || {}),
-    },
-  }).then(r => r.json());
-}
-
-// ─── Login screen ──────────────────────────────────────────────────────────────
-const ROLES = [
-  { code: "architect", label: "Архитектор" },
-  { code: "constructor", label: "Конструктор" },
-  { code: "engineer", label: "Инженер" },
-  { code: "lawyer", label: "Юрист" },
-  { code: "supply", label: "Снабженец" },
-  { code: "manager", label: "Менеджер по продажам" },
-  { code: "build_manager", label: "Руководитель строительства" },
-  { code: "admin", label: "Администратор" },
-];
-
-function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-
-  // Login state
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
-
-  // Register state
-  const [regForm, setRegForm] = useState({ login: "", full_name: "", role_code: "architect", password: "" });
-
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const inp = "w-full px-4 py-3 rounded-xl text-sm text-white outline-none transition-all";
-  const inpStyle = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" };
-  const focusOrange = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => { e.target.style.borderColor = "var(--neon-orange)"; };
-  const blurOrange = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => { e.target.style.borderColor = "rgba(255,255,255,0.1)"; };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(""); setLoading(true);
-    const res = await authFetch(AUTH_URL, { method: "POST", body: JSON.stringify({ login, password }) });
-    setLoading(false);
-    if (res.error) { setError(res.error); return; }
-    localStorage.setItem(TOKEN_KEY, res.token);
-    onLogin(res.staff, res.token);
-  };
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(""); setLoading(true);
-    const res = await authFetch(AUTH_URL, { method: "POST", body: JSON.stringify({ action: "register", ...regForm }) });
-    setLoading(false);
-    if (res.error) { setError(res.error); return; }
-    localStorage.setItem(TOKEN_KEY, res.token);
-    onLogin(res.staff, res.token);
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--dark-bg)" }}>
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full opacity-10"
-          style={{ background: "radial-gradient(circle, var(--neon-orange) 0%, transparent 70%)" }} />
-        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full opacity-8"
-          style={{ background: "radial-gradient(circle, var(--neon-cyan) 0%, transparent 70%)" }} />
-      </div>
-
-      <div className="relative w-full max-w-md mx-4 animate-fade-in">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-display font-black text-2xl mx-auto mb-4"
-            style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff", boxShadow: "0 0 40px rgba(255,107,26,0.4)" }}>
-            СК
-          </div>
-          <h1 className="font-display text-2xl font-bold text-white">Личный кабинет</h1>
-          <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>Сотрудники СтройКалькулятор</p>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex p-1 rounded-xl mb-6" style={{ background: "rgba(255,255,255,0.05)" }}>
-          {(["login", "register"] as const).map(m => (
-            <button key={m} onClick={() => { setMode(m); setError(""); }}
-              className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-              style={{ background: mode === m ? "var(--neon-orange)" : "transparent", color: mode === m ? "#fff" : "rgba(255,255,255,0.5)" }}>
-              {m === "login" ? "Войти" : "Регистрация"}
-            </button>
-          ))}
-        </div>
-
-        {mode === "login" ? (
-          <form onSubmit={handleLogin} className="rounded-2xl p-8 space-y-5"
-            style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Логин</label>
-              <input type="text" value={login} onChange={e => setLogin(e.target.value)} placeholder="architect1"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Пароль</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-              <p className="text-xs mt-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>
-                При первом входе придуманный вами пароль станет постоянным
-              </p>
-            </div>
-            {error && <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>}
-            <button type="submit" disabled={loading}
-              className="w-full py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all hover:scale-[1.02] disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff", boxShadow: "0 0 25px rgba(255,107,26,0.35)" }}>
-              {loading ? "Вход..." : "Войти"}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleRegister} className="rounded-2xl p-8 space-y-4"
-            style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Полное имя</label>
-              <input type="text" value={regForm.full_name} onChange={e => setRegForm(p => ({ ...p, full_name: e.target.value }))} placeholder="Иван Петров"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Логин</label>
-              <input type="text" value={regForm.login} onChange={e => setRegForm(p => ({ ...p, login: e.target.value }))} placeholder="ivan_petrov"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Должность</label>
-              <select value={regForm.role_code} onChange={e => setRegForm(p => ({ ...p, role_code: e.target.value }))}
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange}>
-                {ROLES.map(r => <option key={r.code} value={r.code} style={{ background: "#1a1f2e" }}>{r.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Пароль</label>
-              <input type="password" value={regForm.password} onChange={e => setRegForm(p => ({ ...p, password: e.target.value }))} placeholder="Минимум 6 символов"
-                className={inp} style={inpStyle} onFocus={focusOrange} onBlur={blurOrange} />
-            </div>
-
-            {error && <div className="px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>}
-            <button type="submit" disabled={loading}
-              className="w-full py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all hover:scale-[1.02] disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff", boxShadow: "0 0 25px rgba(255,107,26,0.35)" }}>
-              {loading ? "Создание..." : "Зарегистрироваться"}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Dashboard shell ───────────────────────────────────────────────────────────
-function DashboardShell({ user, token, onLogout, children, globalTab, onGlobalTab }: {
-  user: StaffUser; token: string; onLogout: () => void; children: React.ReactNode;
-  globalTab: string; onGlobalTab: (t: "main"|"ttk"|"settings") => void;
-}) {
-  const color = ROLE_COLORS[user.role_code] || "#fff";
-  const icon = ROLE_ICONS[user.role_code] || "User";
-
-  return (
-    <div className="min-h-screen" style={{ background: "var(--dark-bg)" }}>
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-5%] w-[400px] h-[400px] rounded-full opacity-8"
-          style={{ background: `radial-gradient(circle, ${color} 0%, transparent 70%)` }} />
-      </div>
-
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-white/5"
-        style={{ background: "rgba(10,13,20,0.92)", backdropFilter: "blur(20px)" }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-display font-bold text-xs"
-              style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff" }}>
-              СК
-            </div>
-            <div className="hidden sm:block">
-              <span className="font-display font-semibold text-sm text-white">СтройКалькулятор</span>
-              <span className="text-xs ml-2" style={{ color: "rgba(255,255,255,0.3)" }}>Кабинет сотрудника</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button onClick={() => onGlobalTab("main")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-              style={{ background: globalTab === "main" ? "rgba(255,255,255,0.1)" : "transparent", color: globalTab === "main" ? "#fff" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <Icon name="LayoutDashboard" size={13} />
-              <span className="hidden sm:inline">Кабинет</span>
-            </button>
-            <button onClick={() => onGlobalTab("ttk")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-              style={{ background: globalTab === "ttk" ? "#FBBF24" : "transparent", color: globalTab === "ttk" ? "#000" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <Icon name="BookOpen" size={13} />
-              <span className="hidden sm:inline">Тех. карты</span>
-            </button>
-            {["admin","architect","manager"].includes(user.role_code) && (
-              <button onClick={() => onGlobalTab("settings")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-                style={{ background: globalTab === "settings" ? "#FBBF24" : "transparent", color: globalTab === "settings" ? "#000" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                <Icon name="Settings" size={13} />
-                <span className="hidden sm:inline">Настройки</span>
-              </button>
-            )}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
-              style={{ background: `${color}18`, border: `1px solid ${color}44` }}>
-              <Icon name={icon} size={13} style={{ color }} />
-              <span className="text-xs font-semibold hidden sm:inline" style={{ color }}>{ROLE_LABELS[user.role_code]}</span>
-            </div>
-            <div className="text-sm text-white hidden lg:block">{user.full_name}</div>
-            <button onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all hover:bg-white/10"
-              style={{ color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <Icon name="LogOut" size={13} />
-              <span className="hidden sm:inline">Выйти</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
-        {children}
-      </main>
-
-      <ChatWidget role={user.role_code as ChatRole} userName={user.full_name} />
-    </div>
-  );
-}
-
-// ─── Architect cabinet ─────────────────────────────────────────────────────────
+// ─── Architect cabinet (legacy inline) ────────────────────────────────────────
 function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [projects, setProjects] = useState<HouseProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -401,31 +98,40 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
               <select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
                 className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                {HOUSE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {HOUSE_TYPES.map(t => <option key={t} value={t} style={{ background: "#1a1f2e" }}>{t}</option>)}
               </select>
             </div>
             {[
-              { label: "Площадь (м²)", key: "area", type: "number" },
-              { label: "Этажей", key: "floors", type: "number" },
-              { label: "Комнат", key: "rooms", type: "number" },
-              { label: "Цена (₽)", key: "price", type: "number" },
+              { label: "Площадь (м²)", key: "area" },
+              { label: "Этажей", key: "floors" },
+              { label: "Комнат", key: "rooms" },
+              { label: "Цена (₽)", key: "price" },
             ].map(f => (
               <div key={f.key}>
                 <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>
-                <input type={f.type} value={(form as Record<string, unknown>)[f.key] as number}
+                <input type="number" value={(form as Record<string, unknown>)[f.key] as number}
                   onChange={e => setForm(prev => ({ ...prev, [f.key]: +e.target.value }))}
                   className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
               </div>
             ))}
-            <div className="sm:col-span-2 lg:col-span-3">
-              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Особенности (через запятую)</label>
-              <input type="text" value={form.features}
-                onChange={e => setForm(p => ({ ...p, features: e.target.value }))}
-                placeholder="Камин, Терраса, Панорамные окна"
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Цвет метки</label>
+              <input type="color" value={form.tag_color} onChange={e => setForm(p => ({ ...p, tag_color: e.target.value }))}
+                className="w-full h-10 rounded-xl outline-none cursor-pointer"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
             </div>
+          </div>
+          <div className="mt-4">
+            <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Особенности (через перенос строки)</label>
+            <textarea value={form.features} onChange={e => setForm(p => ({ ...p, features: e.target.value }))} rows={3}
+              placeholder="Тёплый пол&#10;Панорамные окна&#10;Двойное остекление"
+              className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none resize-none"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <input type="checkbox" id="is_active" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
+            <label htmlFor="is_active" className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>Опубликован (виден в каталоге)</label>
           </div>
           {msg && <div className="mt-3 text-sm" style={{ color: msg === "Сохранено!" ? "var(--neon-green)" : "#ef4444" }}>{msg}</div>}
           <div className="flex gap-3 mt-5">
@@ -443,7 +149,6 @@ function ArchitectCabinet({ user, token }: { user: StaffUser; token: string }) {
         </div>
       )}
 
-      {/* Projects list */}
       {loading ? (
         <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
       ) : projects.length === 0 ? (
@@ -514,6 +219,7 @@ function ConstructorCabinet({ user, token }: { user: StaffUser; token: string })
   );
 }
 
+// ─── OldConstructorCabinet (legacy) ───────────────────────────────────────────
 function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [projects, setProjects] = useState<HouseProject[]>([]);
@@ -561,13 +267,15 @@ function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string
     else setMsg(res.error || "Ошибка");
   };
 
+  // suppress unused warning
+  void user;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
         <div>
           <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--neon-orange)" }}>Конструктор</div>
           <h2 className="font-display text-2xl font-bold text-white">Конструктор</h2>
-          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Добро пожаловать, {user.full_name}</p>
         </div>
         {activeConTab === "materials" && (
           <button onClick={openNew}
@@ -578,7 +286,6 @@ function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string
         )}
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-2 mb-5 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)" }}>
         {[{id:"materials",label:"Материалы",icon:"Package"},{id:"specs",label:"Ведомости",icon:"ClipboardList"}].map(t => (
           <button key={t.id} onClick={() => setActiveConTab(t.id as "materials"|"specs")}
@@ -589,7 +296,6 @@ function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string
         ))}
       </div>
 
-      {/* Specs tab */}
       {activeConTab === "specs" && (
         <div className="space-y-3">
           {projects.map((p, i) => (
@@ -606,723 +312,123 @@ function OldConstructorCabinet({ user, token }: { user: StaffUser; token: string
               </button>
             </div>
           ))}
-          {projects.length === 0 && <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>Нет проектов</div>}
+          {openProjectId && (() => {
+            const p = projects.find(pr => pr.id === openProjectId);
+            return p ? <ProjectPanel project={p} token={token} role="constructor" onClose={() => setOpenProjectId(null)} /> : null;
+          })()}
         </div>
       )}
 
-      {openProjectId && (() => {
-        const p = projects.find(pr => pr.id === openProjectId);
-        return p ? <ProjectPanel project={p} token={token} role="constructor" onClose={() => setOpenProjectId(null)} /> : null;
-      })()}
-
-      {/* Materials tab */}
       {activeConTab === "materials" && <>
-
-      {/* Form */}
-      {showForm && (
-        <div className="rounded-2xl p-6 mb-6 animate-scale-in"
-          style={{ background: "var(--card-bg)", border: "1px solid rgba(255,107,26,0.3)" }}>
-          <h3 className="font-display font-semibold text-lg text-white mb-5">
-            {editingId ? "Редактировать позицию" : "Новая позиция"}
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { label: "Раздел", key: "category", placeholder: "Фундамент" },
-              { label: "Наименование", key: "name", placeholder: "Бетон М300" },
-              { label: "Единица", key: "unit", placeholder: "м³" },
-              { label: "Цена за ед. (₽)", key: "price_per_unit", type: "number" },
-              { label: "Формула количества", key: "qty_formula", placeholder: "a * 0.25" },
-              { label: "Порядок", key: "sort_order", type: "number" },
-            ].map(f => (
-              <div key={f.key}>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>
-                <input type={f.type || "text"}
-                  value={(form as Record<string, unknown>)[f.key] as string | number}
-                  onChange={e => setForm(prev => ({ ...prev, [f.key]: f.type === "number" ? +e.target.value : e.target.value }))}
-                  placeholder={f.placeholder}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 mt-4">
-            <input type="checkbox" id="mat_active" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
-            <label htmlFor="mat_active" className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>Активна (участвует в расчёте)</label>
-          </div>
-          <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.25)" }}>
-            В формуле: <code style={{ color: "var(--neon-cyan)" }}>a</code> = площадь, <code style={{ color: "var(--neon-cyan)" }}>fl</code> = этажи
-          </p>
-          {msg && <div className="mt-3 text-sm" style={{ color: msg === "Сохранено!" ? "var(--neon-green)" : "#ef4444" }}>{msg}</div>}
-          <div className="flex gap-3 mt-5">
-            <button onClick={save} disabled={saving}
-              className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
-              style={{ background: "var(--neon-orange)", color: "#fff" }}>
-              {saving ? "Сохранение..." : "Сохранить"}
-            </button>
-            <button onClick={() => setShowForm(false)}
-              className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all hover:bg-white/10"
-              style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.6)" }}>
-              Отмена
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Filter */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        {categories.map(c => (
-          <button key={c} onClick={() => setFilterCat(c)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-            style={{
-              background: filterCat === c ? "var(--neon-orange)" : "rgba(255,255,255,0.06)",
-              color: filterCat === c ? "#fff" : "rgba(255,255,255,0.5)",
-              border: filterCat === c ? "none" : "1px solid rgba(255,255,255,0.08)",
-            }}>
-            {c}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
-      ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                {["Раздел", "Наименование", "Ед.", "Цена/ед., ₽", "Формула", ""].map((h, i) => (
-                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide"
-                    style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid var(--card-border)" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((m, i) => (
-                <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent", opacity: m.is_active ? 1 : 0.45 }}>
-                  <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{m.category}</td>
-                  <td className="px-4 py-3 text-white">{m.name}</td>
-                  <td className="px-4 py-3 text-xs text-center" style={{ color: "rgba(255,255,255,0.5)" }}>{m.unit}</td>
-                  <td className="px-4 py-3 font-semibold" style={{ color: "var(--neon-orange)" }}>{m.price_per_unit.toLocaleString("ru-RU")}</td>
-                  <td className="px-4 py-3 text-xs font-mono" style={{ color: "var(--neon-cyan)" }}>{m.qty_formula}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => openEdit(m)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-white/15"
-                      style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
-                      <Icon name="Pencil" size={12} />
-                    </button>
-                  </td>
-                </tr>
+        {showForm && (
+          <div className="rounded-2xl p-5 mb-5 animate-scale-in"
+            style={{ background: "var(--card-bg)", border: "1px solid rgba(255,107,26,0.3)" }}>
+            <h3 className="font-display font-semibold text-base text-white mb-4">
+              {editingId ? "Редактировать позицию" : "Новая позиция"}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                { label: "Раздел", key: "category", placeholder: "Фундамент" },
+                { label: "Наименование", key: "name", placeholder: "Бетон М300" },
+                { label: "Ед. изм.", key: "unit", placeholder: "м³" },
+                { label: "Цена/ед., ₽", key: "price_per_unit", type: "number" },
+                { label: "Формула кол-ва", key: "qty_formula", placeholder: "a * 0.25" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>
+                  <input type={f.type || "text"} value={(form as Record<string, unknown>)[f.key] as string | number}
+                    onChange={e => setForm(prev => ({ ...prev, [f.key]: f.type === "number" ? +e.target.value : e.target.value }))}
+                    placeholder={(f as {placeholder?: string}).placeholder}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
               ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && (
-            <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>Нет позиций</div>
-          )}
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <input type="checkbox" id="mat_active" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
+              <label htmlFor="mat_active" className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>Активна (участвует в расчёте)</label>
+            </div>
+            <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.25)" }}>
+              В формуле: <code style={{ color: "var(--neon-cyan)" }}>a</code> = площадь, <code style={{ color: "var(--neon-cyan)" }}>fl</code> = этажи
+            </p>
+            {msg && <div className="mt-3 text-sm" style={{ color: msg === "Сохранено!" ? "var(--neon-green)" : "#ef4444" }}>{msg}</div>}
+            <div className="flex gap-3 mt-5">
+              <button onClick={save} disabled={saving}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+                style={{ background: "var(--neon-orange)", color: "#fff" }}>
+                {saving ? "Сохранение..." : "Сохранить"}
+              </button>
+              <button onClick={() => setShowForm(false)}
+                className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all hover:bg-white/10"
+                style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.6)" }}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 mb-5">
+          {categories.map(c => (
+            <button key={c} onClick={() => setFilterCat(c)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{
+                background: filterCat === c ? "var(--neon-orange)" : "rgba(255,255,255,0.06)",
+                color: filterCat === c ? "#fff" : "rgba(255,255,255,0.5)",
+                border: filterCat === c ? "none" : "1px solid rgba(255,255,255,0.08)",
+              }}>
+              {c}
+            </button>
+          ))}
         </div>
-      )}
+
+        {loading ? (
+          <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
+        ) : (
+          <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                  {["Раздел", "Наименование", "Ед.", "Цена/ед., ₽", "Формула", ""].map((h, i) => (
+                    <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide"
+                      style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid var(--card-border)" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m, i) => (
+                  <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent", opacity: m.is_active ? 1 : 0.45 }}>
+                    <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{m.category}</td>
+                    <td className="px-4 py-3 text-white">{m.name}</td>
+                    <td className="px-4 py-3 text-xs text-center" style={{ color: "rgba(255,255,255,0.5)" }}>{m.unit}</td>
+                    <td className="px-4 py-3 font-semibold" style={{ color: "var(--neon-orange)" }}>{m.price_per_unit.toLocaleString("ru-RU")}</td>
+                    <td className="px-4 py-3 text-xs font-mono" style={{ color: "var(--neon-cyan)" }}>{m.qty_formula}</td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => openEdit(m)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-white/15"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
+                        <Icon name="Pencil" size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>Нет позиций</div>
+            )}
+          </div>
+        )}
       </>}
     </div>
   );
 }
 
-// ─── Supply cabinet ────────────────────────────────────────────────────────────
-interface RFQRow { id: number; title: string; construction_address: string; area: number; floors: number; house_type: string; items: {name:string;unit:string;qty:number}[]; deadline: string|null; status: string; proposals_count: number; source_type?: string; source_project_id?: number|null; customer_name?: string; customer_phone?: string; }
-interface ProposalRow { id: number; supplier_id: number; company_name: string; phone: string; email: string; total_amount: number; delivery_days: number; comment: string; status: string; submitted_at: string; }
-interface SupplierRow { id: number; company_name: string; contact_name: string; email: string; phone: string; categories: string; region: string; is_verified: boolean; }
-interface InvoiceRow { id: number; invoice_number: string; amount: number; status: string; created_at: string; rfq_title: string; company_name: string; }
+// suppress unused
+void OldConstructorCabinet;
 
-function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }
-
-function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
-  const [tab, setTab] = useState<"rfqs"|"suppliers"|"prices"|"invoices">("rfqs");
-  // RFQ
-  const [rfqs, setRfqs] = useState<RFQRow[]>([]);
-  const [selectedRfq, setSelectedRfq] = useState<(RFQRow & { proposals?: ProposalRow[] }) | null>(null);
-  const [showRfqForm, setShowRfqForm] = useState(false);
-  const [rfqForm, setRfqForm] = useState({ title: "", construction_address: "", area: 100, floors: 2, house_type: "Кирпичный", deadline: "", customer_name: "", customer_phone: "", source_type: "manual" as "project"|"order"|"manual", source_project_id: null as number|null, order_id: null as number|null, items: [] as {name:string;unit:string;qty:number}[] });
-  const [rfqSource, setRfqSource] = useState<"project"|"order"|"manual">("manual");
-  const [publicProjects, setPublicProjects] = useState<{id:number;name:string;type:string;area:number;floors:number}[]>([]);
-  const [loadingProjects, setLoadingProjects] = useState(false);
-  const [ordersList, setOrdersList] = useState<{id:number;number:string;client_name:string;address:string;status:string;stage:string}[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState(false);
-  const [notifyStatus, setNotifyStatus] = useState("");
-  // Suppliers
-  const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
-  // Prices
-  const [materials, setMaterials] = useState<Material[]>([]);
-  const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
-  const [newPrice, setNewPrice] = useState("");
-  const [filterCat, setFilterCat] = useState("Все");
-  // Invoices
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [generatingInv, setGeneratingInv] = useState<number | null>(null);
-  const [invMsg, setInvMsg] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const supFetch = useCallback((url: string, opts: RequestInit = {}) =>
-    fetch(url, { ...opts, headers: { "Content-Type": "application/json", "X-Auth-Token": token, ...(opts.headers||{}) } }).then(r => r.json()), [token]);
-
-  const loadRfqs = useCallback(async () => {
-    setLoading(true);
-    const res = await supFetch(`${SUPPLIER_API}?action=rfq_list`);
-    setRfqs(res.rfqs || []); setLoading(false);
-  }, [supFetch]);
-
-  const loadSuppliers = useCallback(async () => {
-    setLoading(true);
-    const res = await supFetch(`${SUPPLIER_API}?action=suppliers_list`);
-    setSuppliers(res.suppliers || []); setLoading(false);
-  }, [supFetch]);
-
-  const loadMaterials = useCallback(async () => {
-    setLoading(true);
-    const res = await authFetch(MATERIALS_URL, {}, token);
-    setMaterials(res.items || []); setLoading(false);
-  }, [token]);
-
-  const loadInvoices = useCallback(async () => {
-    setLoading(true);
-    const res = await supFetch(`${SUPPLY_OPS}?action=invoices_list`);
-    setInvoices(res.invoices || []); setLoading(false);
-  }, [supFetch]);
-
-  useEffect(() => {
-    if (tab === "rfqs") loadRfqs();
-    else if (tab === "suppliers") loadSuppliers();
-    else if (tab === "prices") loadMaterials();
-    else if (tab === "invoices") loadInvoices();
-  }, [tab, loadRfqs, loadSuppliers, loadMaterials, loadInvoices]);
-
-  const openRfq = async (rfq: RFQRow) => {
-    const res = await supFetch(`${SUPPLIER_API}?action=rfq_get`, { method: "POST", body: JSON.stringify({ rfq_id: rfq.id }) });
-    setSelectedRfq(res.rfq || null);
-  };
-
-  const loadPublicProjects = useCallback(async () => {
-    setLoadingProjects(true);
-    const res = await fetch(`${PROJECTS_URL}?action=public_list`).then(r => r.json());
-    setPublicProjects((res.projects || []).map((p: Record<string,unknown>) => ({ id: p.id, name: p.name, type: p.type, area: p.area, floors: p.floors })));
-    setLoadingProjects(false);
-  }, []);
-
-  const loadOrdersList = useCallback(async () => {
-    setLoadingOrders(true);
-    const res = await supFetch(`${SUPPLIER_API}?action=orders_list`);
-    setOrdersList(res.orders || []);
-    setLoadingOrders(false);
-  }, [supFetch]);
-
-  const applyProject = (p: {id:number;name:string;type:string;area:number;floors:number}) => {
-    setRfqForm(prev => ({ ...prev, title: p.name, area: p.area, floors: p.floors, house_type: p.type, source_project_id: p.id, source_type: "project" }));
-  };
-
-  const applyOrder = (o: {id:number;number:string;client_name:string;address:string}) => {
-    setRfqForm(prev => ({ ...prev, order_id: o.id, construction_address: o.address, customer_name: o.client_name, source_type: "order", title: prev.title || `Заказ №${o.number}` }));
-  };
-
-  const createRfq = async () => {
-    setSaving(true);
-    const items = (materials || []).slice(0, 20).map(m => ({ name: m.name, unit: m.unit, qty: rfqForm.area }));
-    const res = await supFetch(`${SUPPLIER_API}?action=rfq_create`, { method: "POST", body: JSON.stringify({ ...rfqForm, items }) });
-    setSaving(false);
-    if (res.ok) { setShowRfqForm(false); setRfqSource("manual"); loadRfqs(); }
-  };
-
-  const notifySuppliers = async (rfq_id: number) => {
-    setNotifyStatus("Рассылка...");
-    const res = await supFetch(`${SUPPLIER_API}?action=notify`, { method: "POST", body: JSON.stringify({ rfq_id, channels: ["email","sms"] }) });
-    setNotifyStatus(res.ok ? `Отправлено email: ${res.results?.sent_email}, SMS: ${res.results?.sent_sms}` : res.error || "Ошибка");
-  };
-
-  const awardProposal = async (rfq_id: number, proposal_id: number) => {
-    await supFetch(`${SUPPLIER_API}?action=rfq_award`, { method: "POST", body: JSON.stringify({ rfq_id, proposal_id }) });
-    openRfq(selectedRfq!);
-  };
-
-  const generateInvoice = async (proposal_id: number) => {
-    setGeneratingInv(proposal_id); setInvMsg("");
-    const res = await supFetch(`${SUPPLY_OPS}?action=generate_invoice`, { method: "POST", body: JSON.stringify({ proposal_id }) });
-    setGeneratingInv(null);
-    if (res.ok) {
-      setInvMsg(`Счёт ${res.invoice_number} создан`);
-      if (res.pdf_base64) {
-        const link = document.createElement("a");
-        link.href = "data:application/pdf;base64," + res.pdf_base64;
-        link.download = `${res.invoice_number}.pdf`;
-        link.click();
-      }
-    } else setInvMsg(res.error || "Ошибка генерации");
-  };
-
-  const verifySupplier = async (id: number, verified: boolean) => {
-    await supFetch(`${SUPPLIER_API}?action=verify_supplier`, { method: "POST", body: JSON.stringify({ supplier_id: id, is_verified: verified }) });
-    loadSuppliers();
-  };
-
-  const savePrice = async (id: number) => {
-    setSaving(true);
-    const res = await authFetch(`${MATERIALS_URL}/${id}`, { method: "PUT", body: JSON.stringify({ price_per_unit: +newPrice }) }, token);
-    setSaving(false);
-    if (res.ok) { setEditingPriceId(null); setNewPrice(""); loadMaterials(); }
-  };
-
-  const TABS = [
-    { id: "rfqs", label: "Запросы КП", icon: "FileText" },
-    { id: "suppliers", label: "Поставщики", icon: "Building2" },
-    { id: "prices", label: "Цены", icon: "Tag" },
-    { id: "invoices", label: "Счета", icon: "Receipt" },
-  ] as const;
-
-  const matCategories = ["Все", ...Array.from(new Set(materials.map(m => m.category)))];
-  const filteredMats = filterCat === "Все" ? materials : materials.filter(m => m.category === filterCat);
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "#FBBF24" }}>Снабженец</div>
-          <h2 className="font-display text-2xl font-bold text-white">Снабжение и закупки</h2>
-          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Добро пожаловать, {user.full_name}</p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 mb-6 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)" }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{ background: tab === t.id ? "#FBBF24" : "transparent", color: tab === t.id ? "#000" : "rgba(255,255,255,0.5)" }}>
-            <Icon name={t.icon} size={14} />{t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── RFQ tab ── */}
-      {tab === "rfqs" && (
-        <div>
-          {selectedRfq ? (
-            <div className="animate-fade-in">
-              <button onClick={() => setSelectedRfq(null)} className="flex items-center gap-2 mb-4 text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>
-                <Icon name="ChevronLeft" size={15} /> К списку
-              </button>
-              <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(251,191,36,0.25)" }}>
-                <div className="flex items-center flex-wrap gap-2 mb-1">
-                  <div className="font-display font-bold text-xl text-white">{selectedRfq.title}</div>
-                  {selectedRfq.source_type === "project" && (
-                    <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
-                      style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.25)" }}>
-                      <Icon name="FolderOpen" size={10} /> Из проекта
-                    </span>
-                  )}
-                  {selectedRfq.source_type === "order" && (
-                    <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
-                      style={{ background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
-                      <Icon name="UserCheck" size={10} /> Заказ клиента
-                    </span>
-                  )}
-                </div>
-                <div className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>📍 {selectedRfq.construction_address} · {selectedRfq.area} м² · {selectedRfq.floors} эт.</div>
-                {selectedRfq.source_type === "order" && selectedRfq.customer_name && (
-                  <div className="mt-2 flex items-center gap-3 text-sm px-3 py-2 rounded-xl"
-                    style={{ background: "rgba(0,212,255,0.07)", border: "1px solid rgba(0,212,255,0.15)" }}>
-                    <Icon name="User" size={14} style={{ color: "var(--neon-cyan)" }} />
-                    <span style={{ color: "rgba(255,255,255,0.8)" }}>{selectedRfq.customer_name}</span>
-                    {selectedRfq.customer_phone && (
-                      <a href={`tel:${selectedRfq.customer_phone}`} className="flex items-center gap-1 hover:underline"
-                        style={{ color: "var(--neon-cyan)" }}>
-                        <Icon name="Phone" size={12} /> {selectedRfq.customer_phone}
-                      </a>
-                    )}
-                  </div>
-                )}
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  <button onClick={() => notifySuppliers(selectedRfq.id)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-                    style={{ background: "#FBBF24", color: "#000" }}>
-                    <Icon name="Send" size={14} /> Разослать уведомления
-                  </button>
-                  {notifyStatus && <span className="text-xs self-center" style={{ color: "rgba(255,255,255,0.5)" }}>{notifyStatus}</span>}
-                </div>
-              </div>
-              {invMsg && <div className="mb-4 px-4 py-2 rounded-xl text-sm" style={{ background: "rgba(0,255,136,0.1)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.2)" }}>{invMsg}</div>}
-              <h3 className="font-display font-semibold text-lg text-white mb-3">
-                Предложения поставщиков — отсортированы по цене
-              </h3>
-              {(!selectedRfq.proposals || selectedRfq.proposals.length === 0) ? (
-                <div className="rounded-2xl p-10 text-center" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-                  <div className="text-4xl mb-2">⏳</div>
-                  <div className="text-white">Предложений пока нет</div>
-                  <div className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>Разошлите уведомления поставщикам</div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {selectedRfq.proposals.map((p, i) => (
-                    <div key={p.id} className="rounded-2xl p-5"
-                      style={{
-                        background: i === 0 ? "rgba(251,191,36,0.08)" : "var(--card-bg)",
-                        border: i === 0 ? "1px solid rgba(251,191,36,0.4)" : "1px solid var(--card-border)",
-                      }}>
-                      <div className="flex items-start justify-between flex-wrap gap-3">
-                        <div>
-                          {i === 0 && <div className="text-xs font-semibold mb-1" style={{ color: "#FBBF24" }}>🏆 Лучшая цена</div>}
-                          <div className="font-display font-bold text-lg text-white">{p.company_name}</div>
-                          <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>📞 {p.phone} · ✉️ {p.email}</div>
-                          {p.comment && <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.5)" }}>💬 {p.comment}</div>}
-                          {p.delivery_days && <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>🚚 Срок поставки: {p.delivery_days} дн.</div>}
-                        </div>
-                        <div className="text-right">
-                          <div className="font-display font-black text-2xl" style={{ color: i === 0 ? "#FBBF24" : "rgba(255,255,255,0.7)" }}>
-                            {fmt(p.total_amount)} ₽
-                          </div>
-                          <div className="flex gap-2 mt-2 justify-end flex-wrap">
-                            {p.status !== "winner" && selectedRfq.status !== "awarded" && (
-                              <button onClick={() => awardProposal(selectedRfq.id, p.id)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
-                                style={{ background: "#FBBF24", color: "#000" }}>
-                                Выбрать победителя
-                              </button>
-                            )}
-                            {p.status === "winner" && (
-                              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: "rgba(0,255,136,0.15)", color: "var(--neon-green)" }}>✓ Победитель</span>
-                            )}
-                            <button onClick={() => generateInvoice(p.id)} disabled={generatingInv === p.id}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-60"
-                              style={{ background: "rgba(0,212,255,0.15)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.3)" }}>
-                              <Icon name="FileDown" size={12} />
-                              {generatingInv === p.id ? "Генерация..." : "Выставить счёт PDF"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>{rfqs.length} запросов</span>
-                <button onClick={() => setShowRfqForm(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-                  style={{ background: "#FBBF24", color: "#000" }}>
-                  <Icon name="Plus" size={14} /> Новый запрос КП
-                </button>
-              </div>
-              {showRfqForm && (
-                <div className="rounded-2xl p-6 mb-5 animate-scale-in" style={{ background: "var(--card-bg)", border: "1px solid rgba(251,191,36,0.3)" }}>
-                  <h3 className="font-display font-semibold text-lg text-white mb-4">Создать запрос КП</h3>
-
-                  {/* Источник RFQ */}
-                  <div className="mb-5">
-                    <div className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>Источник запроса</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { id: "project", label: "Из проекта", icon: "FolderOpen", desc: "Каталог архитекторов" },
-                        { id: "order",   label: "Заказ клиента", icon: "UserCheck", desc: "По заявке заказчика" },
-                        { id: "manual",  label: "Вручную",    icon: "PenLine",    desc: "Произвольный запрос" },
-                      ] as const).map(s => (
-                        <button key={s.id} type="button"
-                          onClick={() => {
-                            setRfqSource(s.id);
-                            setRfqForm(p => ({ ...p, source_type: s.id, order_id: null }));
-                            if (s.id === "project" && publicProjects.length === 0) loadPublicProjects();
-                            if (s.id === "order" && ordersList.length === 0) loadOrdersList();
-                          }}
-                          className="flex flex-col items-center gap-1 py-3 px-2 rounded-xl text-center transition-all"
-                          style={{
-                            background: rfqSource === s.id ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.04)",
-                            border: rfqSource === s.id ? "1px solid #FBBF24" : "1px solid rgba(255,255,255,0.08)",
-                            color: rfqSource === s.id ? "#FBBF24" : "rgba(255,255,255,0.5)",
-                          }}>
-                          <Icon name={s.icon} size={18} />
-                          <span className="text-xs font-semibold">{s.label}</span>
-                          <span className="text-xs opacity-60">{s.desc}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Выбор проекта из каталога */}
-                  {rfqSource === "project" && (
-                    <div className="mb-5 rounded-xl p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                      <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>
-                        Выберите проект из каталога
-                      </div>
-                      {loadingProjects ? (
-                        <div className="text-sm py-4 text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка проектов...</div>
-                      ) : publicProjects.length === 0 ? (
-                        <div className="text-sm text-center py-4" style={{ color: "rgba(255,255,255,0.3)" }}>Нет опубликованных проектов</div>
-                      ) : (
-                        <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                          {publicProjects.map(p => (
-                            <button key={p.id} type="button"
-                              onClick={() => applyProject(p)}
-                              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all hover:scale-[1.01]"
-                              style={{
-                                background: rfqForm.source_project_id === p.id ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.04)",
-                                border: rfqForm.source_project_id === p.id ? "1px solid #FBBF24" : "1px solid rgba(255,255,255,0.07)",
-                              }}>
-                              <div>
-                                <div className="text-sm font-semibold text-white">{p.name}</div>
-                                <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{p.type} · {p.area} м² · {p.floors} эт.</div>
-                              </div>
-                              {rfqForm.source_project_id === p.id && <Icon name="CheckCircle2" size={16} style={{ color: "#FBBF24", flexShrink: 0 }} />}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Выбор заказа клиента */}
-                  {rfqSource === "order" && (
-                    <div className="mb-5 rounded-xl p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                      <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>Выберите заказ</div>
-                      {loadingOrders ? (
-                        <div className="text-sm py-4 text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка заказов...</div>
-                      ) : ordersList.length === 0 ? (
-                        <div className="text-sm text-center py-4" style={{ color: "rgba(255,255,255,0.3)" }}>Нет заказов с адресом объекта</div>
-                      ) : (
-                        <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                          {ordersList.map(o => (
-                            <button key={o.id} type="button"
-                              onClick={() => applyOrder(o)}
-                              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all hover:scale-[1.01]"
-                              style={{
-                                background: rfqForm.order_id === o.id ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.04)",
-                                border: rfqForm.order_id === o.id ? "1px solid #FBBF24" : "1px solid rgba(255,255,255,0.07)",
-                              }}>
-                              <div>
-                                <div className="text-sm font-semibold text-white">№{o.number} — {o.client_name}</div>
-                                <div className="flex items-center gap-1.5 mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
-                                  <Icon name="MapPin" size={11} />
-                                  <span className="text-xs">{o.address}</span>
-                                </div>
-                              </div>
-                              {rfqForm.order_id === o.id && <Icon name="CheckCircle2" size={16} style={{ color: "#FBBF24", flexShrink: 0 }} />}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {rfqForm.order_id && (
-                        <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
-                          <Icon name="MapPin" size={13} style={{ color: "#FBBF24" }} />
-                          <span className="text-xs text-white">Адрес подтянут из заказа и заблокирован для изменений</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Основные поля объекта */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                    {[
-                      { label:"Название объекта", key:"title", placeholder:"Жилой дом, ул. Ленина 12" },
-                      { label:"Адрес строительства", key:"construction_address", placeholder:"г. Москва, ул. Ленина, 12" },
-                      { label:"Срок подачи КП", key:"deadline", type:"date" },
-                    ].map(f => {
-                      const isAddressLocked = f.key === "construction_address" && !!rfqForm.order_id;
-                      return (
-                      <div key={f.key}>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>
-                          {f.label}{isAddressLocked && <span className="ml-1.5 normal-case tracking-normal font-normal" style={{ color: "#FBBF24" }}>из заказа</span>}
-                        </label>
-                        <input type={f.type||"text"} value={(rfqForm as Record<string,unknown>)[f.key] as string} placeholder={f.placeholder}
-                          readOnly={isAddressLocked}
-                          onChange={e => !isAddressLocked && setRfqForm(p => ({...p,[f.key]:e.target.value}))}
-                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                          style={{ background: isAddressLocked ? "rgba(251,191,36,0.07)" : "rgba(255,255,255,0.06)", border: isAddressLocked ? "1px solid rgba(251,191,36,0.3)" : "1px solid rgba(255,255,255,0.1)", cursor: isAddressLocked ? "default" : "text" }} />
-                      </div>
-                      );
-                    })}
-                    {[{label:"Площадь (м²)",key:"area"},{label:"Этажей",key:"floors"}].map(f => (
-                      <div key={f.key}>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>
-                        <input type="number" value={(rfqForm as Record<string,unknown>)[f.key] as number}
-                          onChange={e => setRfqForm(p => ({...p,[f.key]:+e.target.value}))}
-                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-                      </div>
-                    ))}
-                  </div>
-
-                  {rfqForm.source_project_id && (
-                    <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl text-xs"
-                      style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.25)", color: "#FBBF24" }}>
-                      <Icon name="Link2" size={13} />
-                      Привязан к проекту: <strong>{publicProjects.find(p=>p.id===rfqForm.source_project_id)?.name}</strong>
-                    </div>
-                  )}
-
-                  <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.35)" }}>
-                    Список материалов из сметы будет добавлен автоматически
-                  </p>
-                  <div className="flex gap-3">
-                    <button onClick={createRfq} disabled={saving}
-                      className="px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
-                      style={{ background: "#FBBF24", color: "#000" }}>
-                      {saving ? "Создание..." : "Создать и разослать"}
-                    </button>
-                    <button onClick={() => { setShowRfqForm(false); setRfqSource("manual"); }}
-                      className="px-6 py-2.5 rounded-xl text-sm"
-                      style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.6)" }}>
-                      Отмена
-                    </button>
-                  </div>
-                </div>
-              )}
-              {loading ? <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div> : (
-                <div className="space-y-3">
-                  {rfqs.map((rfq, i) => (
-                    <div key={rfq.id} className="rounded-2xl p-5 cursor-pointer transition-all hover:scale-[1.005]"
-                      style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", animation: `fadeInUp 0.4s ease-out ${i*0.04}s both` }}
-                      onClick={() => openRfq(rfq)}>
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center flex-wrap gap-2 mb-1">
-                            <span className="font-display font-bold text-lg text-white">{rfq.title}</span>
-                            <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
-                              style={{ background: rfq.status==="open"?"rgba(0,255,136,0.15)":rfq.status==="awarded"?"rgba(251,191,36,0.15)":"rgba(255,255,255,0.07)", color: rfq.status==="open"?"var(--neon-green)":rfq.status==="awarded"?"#FBBF24":"rgba(255,255,255,0.4)" }}>
-                              {rfq.status==="open"?"Открыт":rfq.status==="awarded"?"Завершён":"Закрыт"}
-                            </span>
-                            {rfq.source_type === "project" && (
-                              <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
-                                style={{ background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.25)" }}>
-                                <Icon name="FolderOpen" size={10} /> Из проекта
-                              </span>
-                            )}
-                            {rfq.source_type === "order" && (
-                              <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
-                                style={{ background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
-                                <Icon name="UserCheck" size={10} /> Заказ клиента
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>📍 {rfq.construction_address} · {rfq.area} м² · {rfq.floors} эт.</div>
-                          {rfq.source_type === "order" && rfq.customer_name && (
-                            <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.35)" }}>
-                              👤 {rfq.customer_name}{rfq.customer_phone ? ` · ${rfq.customer_phone}` : ""}
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-right ml-3">
-                          <div className="font-display font-bold text-xl" style={{ color: "#FBBF24" }}>{rfq.proposals_count || 0}</div>
-                          <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>предложений</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {rfqs.length === 0 && <div className="rounded-2xl p-12 text-center" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-                    <div className="text-5xl mb-2">📋</div><div className="text-white">Создайте первый запрос КП</div>
-                  </div>}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Suppliers tab ── */}
-      {tab === "suppliers" && (
-        <div>
-          <div className="mb-4 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>{suppliers.length} поставщиков зарегистрировано</div>
-          {loading ? <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div> : (
-            <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                    {["Компания","Контакт","Категории","Регион","Статус",""].map((h,i) => (
-                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid var(--card-border)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {suppliers.map((s, i) => (
-                    <tr key={s.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i%2?"rgba(255,255,255,0.015)":"transparent" }}>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-white">{s.company_name}</div>
-                        <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>{s.email}</div>
-                      </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>{s.contact_name}<br/>{s.phone}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {(s.categories||"").split(",").filter(Boolean).map(c => (
-                            <span key={c} className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}>{c.trim()}</span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>{s.region||"—"}</td>
-                      <td className="px-4 py-3">
-                        {s.is_verified
-                          ? <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)" }}>✓ Верифицирован</span>
-                          : <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}>На проверке</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {!s.is_verified
-                          ? <button onClick={() => verifySupplier(s.id, true)} className="px-3 py-1 rounded-lg text-xs font-semibold" style={{ background: "var(--neon-green)", color: "#000" }}>Верифицировать</button>
-                          : <button onClick={() => verifySupplier(s.id, false)} className="px-3 py-1 rounded-lg text-xs" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444" }}>Отозвать</button>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {suppliers.length === 0 && <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>Поставщики ещё не зарегистрировались</div>}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Prices tab ── */}
-      {tab === "prices" && <MaterialsDB user={user} token={token} />}
-
-      {/* ── Invoices tab ── */}
-      {tab === "invoices" && (
-        <div>
-          {loading ? <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div> : (
-            invoices.length === 0
-              ? <div className="rounded-2xl p-12 text-center" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-                  <div className="text-5xl mb-2">🧾</div><div className="text-white">Счётов пока нет</div>
-                  <div className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>Счета создаются из запросов КП</div>
-                </div>
-              : <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--card-border)" }}>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                        {["Номер счёта","Объект","Поставщик","Сумма","Статус","Дата"].map((h,i) => (
-                          <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)", borderBottom: "1px solid var(--card-border)" }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {invoices.map((inv, i) => (
-                        <tr key={inv.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i%2?"rgba(255,255,255,0.015)":"transparent" }}>
-                          <td className="px-4 py-3 font-mono text-sm" style={{ color: "var(--neon-cyan)" }}>{inv.invoice_number}</td>
-                          <td className="px-4 py-3 text-white">{inv.rfq_title}</td>
-                          <td className="px-4 py-3 text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>{inv.company_name}</td>
-                          <td className="px-4 py-3 font-display font-bold" style={{ color: "#FBBF24" }}>{fmt(inv.amount)} ₽</td>
-                          <td className="px-4 py-3">
-                            <span className="text-xs px-2 py-0.5 rounded-full"
-                              style={{ background: inv.status==="paid"?"rgba(0,255,136,0.12)":"rgba(255,255,255,0.07)", color: inv.status==="paid"?"var(--neon-green)":"rgba(255,255,255,0.5)" }}>
-                              {inv.status==="paid"?"✅ Оплачен":inv.status==="sent"?"📬 Отправлен":"📝 Черновик"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{new Date(inv.created_at).toLocaleDateString("ru-RU")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Readonly cabinet (Engineer / Lawyer) ─────────────────────────────────────
+// ─── Readonly cabinet (Engineer / Lawyer / etc.) ──────────────────────────────
 function ReadonlyCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [projects, setProjects] = useState<HouseProject[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -1342,14 +448,12 @@ function ReadonlyCabinet({ user, token }: { user: StaffUser; token: string }) {
 
   const matCategories = Array.from(new Set(materials.map(m => m.category)));
   const color = ROLE_COLORS[user.role_code] || "#fff";
-  const roleLabel = ROLE_LABELS[user.role_code] || user.role_code;
+  const roleLabel = { engineer: "Инженер", lawyer: "Юрист", build_manager: "Рук. строительства", admin: "Администратор" }[user.role_code] || user.role_code;
 
   return (
     <div>
       <div className="mb-6">
-        <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color }}>
-          {roleLabel}
-        </div>
+        <div className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color }}>{roleLabel}</div>
         <h2 className="font-display text-2xl font-bold text-white">Просмотр данных</h2>
         <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Добро пожаловать, {user.full_name}</p>
       </div>
@@ -1397,23 +501,20 @@ function ReadonlyCabinet({ user, token }: { user: StaffUser; token: string }) {
                     <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
                       <td className="px-4 py-2.5 text-white">{m.name}</td>
                       <td className="px-4 py-2.5 text-xs text-center" style={{ color: "rgba(255,255,255,0.4)" }}>{m.unit}</td>
-                      <td className="px-4 py-2.5 text-right font-semibold" style={{ color }}>
-                        {m.price_per_unit.toLocaleString("ru-RU")} ₽
-                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold" style={{ color }}>{m.price_per_unit.toLocaleString("ru-RU")} ₽</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ))}
-          {materials.length === 0 && <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>Материалы не заполнены</div>}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Main export ───────────────────────────────────────────────────────────────
+// ─── Main Staff page ───────────────────────────────────────────────────────────
 export default function Staff() {
   const [user, setUser] = useState<StaffUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
