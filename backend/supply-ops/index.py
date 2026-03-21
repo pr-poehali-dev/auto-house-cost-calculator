@@ -1,7 +1,7 @@
 """
 supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент
 """
-import json, os, io, base64, uuid, ssl, urllib.request, urllib.parse, urllib.error
+import json, os, io, base64, uuid, ssl, re, urllib.request, urllib.parse, urllib.error
 import psycopg2
 from datetime import datetime
 
@@ -100,6 +100,22 @@ def gigachat_token() -> str:
     ctx.verify_mode = ssl.CERT_NONE
     with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
         return json.loads(r.read())["access_token"]
+
+def gigachat_complete(messages: list, max_tokens: int = 1500, temperature: float = 0.7) -> str:
+    token = gigachat_token()
+    payload = {"model": "GigaChat", "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    req = urllib.request.Request(
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+        result = json.loads(r.read().decode())
+    return result["choices"][0]["message"]["content"].strip()
 
 def get_openai_response(messages: list, role: str) -> str:
     if not os.environ.get("GIGACHAT_AUTH_KEY"):
@@ -211,7 +227,7 @@ def handler(event, context):
     body = {}
     if event.get("body"):
         try: body = json.loads(event["body"])
-        except: pass
+        except Exception: pass
 
     conn = db()
 
@@ -313,9 +329,8 @@ def handler(event, context):
         if not project:
             return resp({"error": "project обязателен"}, 400)
 
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        if not api_key:
-            return resp({"error": "DEEPSEEK_API_KEY не настроен"}, 500)
+        if not os.environ.get("GIGACHAT_AUTH_KEY"):
+            return resp({"error": "GIGACHAT_AUTH_KEY не настроен"}, 500)
 
         has_desc = bool(project.get("description", "").strip())
         has_features = bool(project.get("features", "").strip())
@@ -340,45 +355,19 @@ def handler(event, context):
 - Рендеры: {"ЕСТЬ" if has_renders else "НЕТ — нужны изображения"}
 - Смета: {"ЕСТЬ" if has_spec else "НЕТ — нужна ведомость ОР"}
 
-ЗАДАЧА: Верни JSON со следующими полями:
-{{
-  "status": "краткая оценка готовности проекта (1 предложение)",
-  "next_steps": ["шаг 1", "шаг 2", "шаг 3"],
-  "description": "продающее описание проекта для клиента (2-3 предложения)",
-  "features": "особенность 1\\nособенность 2\\nособенность 3\\nособенность 4\\nособенность 5",
-  "tag_suggestion": "рекомендуемый тег если текущий плохой, иначе пустая строка"
-}}
+ЗАДАЧА: Верни ТОЛЬКО JSON без пояснений:
+{{"status":"краткая оценка готовности (1 предложение)","next_steps":["шаг 1","шаг 2","шаг 3"],"description":"продающее описание для клиента (2-3 предложения)","features":"особенность 1\\nособенность 2\\nособенность 3\\nособенность 4\\nособенность 5","tag_suggestion":"рекомендуемый тег или пустая строка"}}
 
-Описание — живой маркетинговый текст для покупателя. Особенности — конкретные, полезные, 5-7 штук."""
+Описание — живой маркетинговый текст. Особенности — конкретные, полезные, 5-7 штук."""
 
-        payload = json.dumps({
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-            "max_tokens": 1000,
-            "response_format": {"type": "json_object"},
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            "https://api.deepseek.com/v1/chat/completions",
-            data=payload,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                result = json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code == 402:
-                return resp({"error": "Кредиты DeepSeek закончились. Обратитесь к администратору для пополнения баланса."}, 402)
-            return resp({"error": f"Ошибка AI-сервиса: {e.code}"}, 502)
+            content = gigachat_complete([{"role": "user", "content": prompt}], max_tokens=1200, temperature=0.7)
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            parsed = json.loads(match.group()) if match else {}
         except Exception as e:
-            return resp({"error": f"Ошибка запроса к AI: {str(e)}"}, 502)
+            return resp({"error": f"Ошибка AI: {str(e)}"}, 502)
 
-        content = result["choices"][0]["message"]["content"]
-        try:
-            parsed = json.loads(content)
-        except Exception:
+        if not parsed:
             parsed = {"status": "Анализ выполнен", "next_steps": [], "description": "", "features": "", "tag_suggestion": ""}
 
         return resp({"ok": True, **parsed})
@@ -390,88 +379,34 @@ def handler(event, context):
         if not prefs:
             return resp({"error": "preferences обязательны"}, 400)
 
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        if not api_key:
-            return resp({"error": "DEEPSEEK_API_KEY не настроен"}, 500)
+        if not os.environ.get("GIGACHAT_AUTH_KEY"):
+            return resp({"error": "GIGACHAT_AUTH_KEY не настроен"}, 500)
 
-        # Формируем промпт описания
-        desc_prompt = f"""Создай профессиональное описание проекта частного дома на основе предпочтений заказчика.
+        desc_prompt = f"""Создай профессиональное описание проекта частного дома.
 
-Предпочтения:
+Предпочтения заказчика:
 - Бюджет: {prefs.get('budget', 'не указан')} ₽
 - Площадь: {prefs.get('area', 'не указана')} м²
 - Этажей: {prefs.get('floors', 'не указано')}
-- Количество комнат: {prefs.get('rooms', 'не указано')}
+- Комнат: {prefs.get('rooms', 'не указано')}
 - Стиль: {prefs.get('style', 'современный')}
-- Тип: {prefs.get('house_type', 'кирпичный')}
-- Особые пожелания: {prefs.get('wishes', 'нет')}
+- Тип дома: {prefs.get('house_type', 'кирпичный')}
+- Пожелания: {prefs.get('wishes', 'нет')}
 
-Напиши:
-1. Название проекта (1 строка, без кавычек)
-2. Описание (2-3 предложения, поэтично и профессионально)
-3. 3-4 ключевые особенности через запятую (без перечисления номерами)
-4. Рекомендуемый тег (1 слово: Популярный/Хит/Премиум/Новинка/Бюджет/Люкс)
-
-Формат ответа строго JSON:
-{{"name": "...", "description": "...", "features": "особ1, особ2, особ3", "tag": "..."}}"""
-
-        desc_messages = [{"role": "user", "content": desc_prompt}]
-        desc_payload = {"model": "deepseek-chat", "messages": desc_messages, "max_tokens": 512, "temperature": 0.8, "response_format": {"type": "json_object"}}
+Верни ТОЛЬКО JSON без пояснений:
+{{"name":"название проекта без кавычек","description":"2-3 предложения поэтично и профессионально","features":"особ1, особ2, особ3, особ4","tag":"Популярный или Хит или Премиум или Новинка или Бюджет или Люкс"}}"""
 
         try:
-            req = urllib.request.Request(
-                "https://api.deepseek.com/v1/chat/completions",
-                data=json.dumps(desc_payload).encode(),
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=30) as r:
-                result = json.loads(r.read().decode())
-            desc_text = result["choices"][0]["message"]["content"]
-            try:
-                desc_data = json.loads(desc_text)
-            except:
-                desc_data = {"name": "Мой проект", "description": desc_text, "features": "", "tag": "Новинка"}
+            content = gigachat_complete([{"role": "user", "content": desc_prompt}], max_tokens=600, temperature=0.8)
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            desc_data = json.loads(match.group()) if match else {}
         except Exception as e:
             return resp({"error": f"Ошибка генерации описания: {str(e)}"}, 500)
 
-        # Генерация рендера через DALL-E 3
-        style_map = {
-            "современный": "modern minimalist",
-            "классический": "classic traditional",
-            "скандинавский": "Scandinavian",
-            "хай-тек": "high-tech futuristic",
-            "барокко": "baroque",
-            "прованс": "French Provence",
-            "лофт": "loft industrial",
-        }
-        style_en = style_map.get(prefs.get("style","современный"), "modern")
-        house_type_en = {
-            "кирпичный":"brick","каркасный":"wooden frame","монолитный":"concrete monolithic",
-            "деревянный":"wooden log","газобетон":"aerated concrete","модульный":"modular"
-        }.get(prefs.get("house_type","кирпичный"), "brick")
+        if not desc_data.get("name"):
+            desc_data = {"name": "Мой проект", "description": "", "features": "", "tag": "Новинка"}
 
-        dalle_prompt = (
-            f"Architectural rendering of a {style_en} {house_type_en} private house, "
-            f"{prefs.get('floors',2)} floors, {prefs.get('area',150)} square meters, "
-            f"photorealistic exterior view, professional architectural visualization, "
-            f"dramatic lighting, landscaped surroundings, ultra-detailed, 8K quality"
-        )
-
-        render_url = ""
-        try:
-            dalle_payload = {"model": "dall-e-3", "prompt": dalle_prompt, "n": 1, "size": "1024x1024", "quality": "standard"}
-            req2 = urllib.request.Request(
-                "https://api.openai.com/v1/images/generations",
-                data=json.dumps(dalle_payload).encode(),
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req2, timeout=60) as r2:
-                img_result = json.loads(r2.read().decode())
-            render_url = img_result["data"][0]["url"]
-        except Exception as e:
-            render_url = ""  # Рендер не критичен
+        render_url = ""  # Рендер не генерируем (без платного API)
 
         # Сохраняем заявку в БД
         conn2 = db()
@@ -484,7 +419,7 @@ def handler(event, context):
                  json.dumps(prefs, ensure_ascii=False), desc_data.get("description",""), render_url))
             req_id = cur.fetchone()[0]
             conn2.commit(); cur.close()
-        except:
+        except Exception:
             req_id = None
         finally:
             conn2.close()
