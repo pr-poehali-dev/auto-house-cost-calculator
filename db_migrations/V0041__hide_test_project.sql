@@ -1,0 +1,1 @@
+UPDATE t_p78845984_auto_house_cost_calc.house_projects SET is_active = false WHERE id = 1;

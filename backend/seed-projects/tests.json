@@ -1,0 +1,10 @@
+{
+  "tests": [
+    {
+      "name": "Wrong action returns 400",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 400
+    }
+  ]
+}
