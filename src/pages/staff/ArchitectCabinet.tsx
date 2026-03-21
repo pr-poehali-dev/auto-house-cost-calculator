@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
+const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
 const CHUNK_SIZE = 3 * 1024 * 1024; // 3МБ на чанк
 
 async function uploadFileChunked(
@@ -818,10 +819,278 @@ function TechTab({ proj, token, onOpenLibrary }: { proj: Project; token: string;
   );
 }
 
+// ─── AiAssistantTab ──────────────────────────────────────────────────────────
+
+interface AiAnalysis {
+  status: string;
+  next_steps: string[];
+  description: string;
+  features: string;
+  tag_suggestion: string;
+}
+
+interface ChatMsg { role: "user" | "assistant"; content: string; }
+
+function AiAssistantTab({ proj, token, onApply }: {
+  proj: Project; token: string;
+  onApply: (patch: Partial<{ description: string; features: string; tag: string }>) => void;
+}) {
+  const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const analyze = async () => {
+    setLoading(true); setAnalysis(null);
+    const r = await apiFetch(`${AI_URL}?action=architect_analyze`, {
+      method: "POST",
+      body: JSON.stringify({
+        project: {
+          name: proj.name, type: proj.type, area: proj.area, floors: proj.floors,
+          rooms: proj.rooms, price: proj.price, tag: proj.tag,
+          roof_type: proj.roof_type, foundation_type: proj.foundation_type, wall_type: proj.wall_type,
+          description: proj.description, features: proj.features,
+          renders_count: (proj.files || []).filter(f => f.file_type === "render").length,
+          spec_items_count: 0,
+        }
+      })
+    }, token);
+    setLoading(false);
+    if (r.ok) setAnalysis(r as AiAnalysis);
+  };
+
+  useEffect(() => { analyze(); }, []);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat]);
+
+  const applyField = async (field: "description" | "features" | "tag", value: string) => {
+    setApplying(field);
+    await apiFetch(`${PROJECTS_URL}?action=update`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: proj.id, [field]: value }),
+    }, token);
+    setApplying(null);
+    setApplied(prev => new Set([...prev, field]));
+    onApply({ [field]: value });
+  };
+
+  const sendChat = async () => {
+    const msg = input.trim();
+    if (!msg || chatLoading) return;
+    const context = `Контекст проекта: "${proj.name}", ${proj.type}, ${proj.area}м², ${proj.floors} эт., ${proj.rooms} комн., ${(proj.price/1000000).toFixed(1)}млн₽. Стены: ${proj.wall_type || "не указаны"}. Кровля: ${proj.roof_type || "не указана"}.`;
+    const newChat: ChatMsg[] = [...chat, { role: "user", content: msg }];
+    setChat(newChat); setInput(""); setChatLoading(true);
+    const messagesForApi = [
+      { role: "user" as const, content: context },
+      ...newChat,
+    ];
+    const r = await apiFetch(`${AI_URL}?action=chat`, {
+      method: "POST",
+      body: JSON.stringify({ messages: messagesForApi, role: "architect" }),
+    }, token);
+    setChatLoading(false);
+    if (r.reply) setChat(prev => [...prev, { role: "assistant", content: r.reply }]);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Анализ проекта */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(0,212,255,0.25)" }}>
+        <div className="px-5 py-4 flex items-center justify-between"
+          style={{ background: "linear-gradient(135deg, rgba(0,212,255,0.1), rgba(168,85,247,0.08))" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: "rgba(0,212,255,0.15)" }}>
+              <Icon name="Sparkles" size={18} style={{ color: "var(--neon-cyan)" }} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">AI-анализ проекта</p>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Автоматический разбор и план действий</p>
+            </div>
+          </div>
+          <button onClick={analyze} disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105 disabled:opacity-50"
+            style={{ background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+            <Icon name={loading ? "Loader2" : "RefreshCw"} size={12} className={loading ? "animate-spin" : ""} />
+            {loading ? "Анализирую..." : "Обновить"}
+          </button>
+        </div>
+
+        {loading && (
+          <div className="px-5 py-8 text-center">
+            <div className="w-8 h-8 border-2 border-white/10 rounded-full mx-auto mb-3 animate-spin"
+              style={{ borderTopColor: "var(--neon-cyan)" }} />
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+              Анализирую проект «{proj.name}»...
+            </p>
+          </div>
+        )}
+
+        {analysis && !loading && (
+          <div className="p-5 space-y-4">
+            {/* Статус */}
+            <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl"
+              style={{ background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.15)" }}>
+              <Icon name="Info" size={14} style={{ color: "var(--neon-cyan)", flexShrink: 0, marginTop: 2 }} />
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>{analysis.status}</p>
+            </div>
+
+            {/* Следующие шаги */}
+            {analysis.next_steps?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: "rgba(255,255,255,0.35)" }}>
+                  Следующие шаги
+                </p>
+                <div className="space-y-2">
+                  {analysis.next_steps.map((step, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                        style={{ background: "rgba(0,212,255,0.15)", color: "var(--neon-cyan)" }}>{i + 1}</div>
+                      <span className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>{step}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Описание */}
+            {analysis.description && (
+              <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="px-4 py-2.5 flex items-center justify-between"
+                  style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    Сгенерированное описание
+                  </span>
+                  <button
+                    onClick={() => applyField("description", analysis.description)}
+                    disabled={applying === "description" || applied.has("description")}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-50"
+                    style={{ background: applied.has("description") ? "rgba(0,255,136,0.15)" : "rgba(0,212,255,0.12)", color: applied.has("description") ? "var(--neon-green)" : "var(--neon-cyan)" }}>
+                    {applying === "description"
+                      ? <><Icon name="Loader2" size={11} className="animate-spin" /> Применяю...</>
+                      : applied.has("description")
+                      ? <><Icon name="Check" size={11} /> Применено</>
+                      : <><Icon name="Download" size={11} /> Применить</>
+                    }
+                  </button>
+                </div>
+                <div className="px-4 py-3 text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.7)" }}>
+                  {analysis.description}
+                </div>
+              </div>
+            )}
+
+            {/* Особенности */}
+            {analysis.features && (
+              <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="px-4 py-2.5 flex items-center justify-between"
+                  style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    Сгенерированные особенности
+                  </span>
+                  <button
+                    onClick={() => applyField("features", analysis.features)}
+                    disabled={applying === "features" || applied.has("features")}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-50"
+                    style={{ background: applied.has("features") ? "rgba(0,255,136,0.15)" : "rgba(0,212,255,0.12)", color: applied.has("features") ? "var(--neon-green)" : "var(--neon-cyan)" }}>
+                    {applying === "features"
+                      ? <><Icon name="Loader2" size={11} className="animate-spin" /> Применяю...</>
+                      : applied.has("features")
+                      ? <><Icon name="Check" size={11} /> Применено</>
+                      : <><Icon name="Download" size={11} /> Применить</>
+                    }
+                  </button>
+                </div>
+                <div className="px-4 py-3 space-y-1.5">
+                  {analysis.features.split("\n").filter(Boolean).map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>
+                      <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "var(--neon-cyan)" }} />
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Чат с AI */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(168,85,247,0.2)" }}>
+        <div className="px-5 py-3 flex items-center gap-2"
+          style={{ background: "rgba(168,85,247,0.08)", borderBottom: "1px solid rgba(168,85,247,0.15)" }}>
+          <Icon name="MessageCircle" size={15} style={{ color: "#A855F7" }} />
+          <span className="text-sm font-semibold text-white">Чат с AI-ассистентом</span>
+        </div>
+
+        <div className="p-4 space-y-3 max-h-72 overflow-y-auto">
+          {chat.length === 0 && (
+            <div className="text-center py-6">
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Задайте вопрос по проекту</p>
+              <div className="flex flex-wrap gap-2 justify-center mt-3">
+                {["Как улучшить описание?", "Какие особенности добавить?", "Что указать в теге?"].map(s => (
+                  <button key={s} onClick={() => setInput(s)}
+                    className="px-3 py-1.5 rounded-lg text-xs transition-all hover:scale-105"
+                    style={{ background: "rgba(168,85,247,0.1)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.2)" }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {chat.map((m, i) => (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className="max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                style={{
+                  background: m.role === "user" ? "rgba(168,85,247,0.2)" : "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.85)",
+                  borderBottomRightRadius: m.role === "user" ? 4 : undefined,
+                  borderBottomLeftRadius: m.role === "assistant" ? 4 : undefined,
+                }}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {chatLoading && (
+            <div className="flex justify-start">
+              <div className="px-4 py-2.5 rounded-2xl" style={{ background: "rgba(255,255,255,0.05)" }}>
+                <Icon name="Loader2" size={14} className="animate-spin" style={{ color: "#A855F7" }} />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="px-4 pb-4">
+          <div className="flex gap-2">
+            <input
+              value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
+              placeholder="Спросите что-нибудь о проекте..."
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm text-white outline-none"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(168,85,247,0.25)" }}
+            />
+            <button onClick={sendChat} disabled={chatLoading || !input.trim()}
+              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-110 disabled:opacity-40"
+              style={{ background: "rgba(168,85,247,0.2)", color: "#A855F7" }}>
+              <Icon name="Send" size={15} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"info" | "files" | "spec" | "tech">("info");
+  const [tab, setTab] = useState<"ai" | "info" | "files" | "spec" | "tech">("ai");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -882,6 +1151,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   };
 
   const TABS = [
+    { id: "ai", label: "AI-ассистент", icon: "Sparkles" },
     { id: "info", label: "Информация", icon: "Info" },
     { id: "files", label: "Графика", icon: "Image", count: proj.files?.length },
     { id: "spec", label: "Ведомость ОР", icon: "FileSpreadsheet" },
@@ -915,24 +1185,31 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-xl mb-6 overflow-x-auto" style={{ background: "rgba(255,255,255,0.04)" }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
-            style={{
-              background: tab === t.id ? "var(--neon-orange)" : "transparent",
-              color: tab === t.id ? "#fff" : "rgba(255,255,255,0.5)",
-              boxShadow: tab === t.id ? "0 0 15px rgba(255,107,26,0.3)" : "none",
-            }}>
-            <Icon name={t.icon} size={14} />
-            {t.label}
-            {"count" in t && t.count ? (
-              <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold"
-                style={{ background: tab === t.id ? "rgba(255,255,255,0.25)" : "rgba(255,107,26,0.3)", color: tab === t.id ? "#fff" : "var(--neon-orange)", fontSize: 10 }}>
-                {t.count}
-              </span>
-            ) : null}
-          </button>
-        ))}
+        {TABS.map(t => {
+          const isAi = t.id === "ai";
+          const isActive = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
+              style={{
+                background: isActive ? (isAi ? "var(--neon-cyan)" : "var(--neon-orange)") : "transparent",
+                color: isActive ? (isAi ? "#0a0d14" : "#fff") : "rgba(255,255,255,0.5)",
+                boxShadow: isActive ? (isAi ? "0 0 15px rgba(0,212,255,0.35)" : "0 0 15px rgba(255,107,26,0.3)") : "none",
+              }}>
+              <Icon name={t.icon} size={14} />
+              {t.label}
+              {isAi && !isActive && (
+                <span className="ml-1 w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--neon-cyan)" }} />
+              )}
+              {"count" in t && t.count ? (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold"
+                  style={{ background: isActive ? "rgba(255,255,255,0.25)" : "rgba(255,107,26,0.3)", color: isActive ? "#fff" : "var(--neon-orange)", fontSize: 10 }}>
+                  {t.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Информация ── */}
@@ -1077,6 +1354,15 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
             </div>
           )}
         </div>
+      )}
+
+      {/* ── AI-ассистент ── */}
+      {tab === "ai" && (
+        <AiAssistantTab
+          proj={proj}
+          token={token}
+          onApply={patch => setProj(p => ({ ...p, ...patch }))}
+        />
       )}
 
       {/* ── Тех. карты ── */}

@@ -24,15 +24,21 @@ SYSTEM_PROMPTS = {
 - Объясняешь что входит в смету и из чего складывается стоимость
 Отвечай кратко, по-деловому, на русском языке. Если не знаешь точной цифры — давай ориентировочный диапазон.""",
 
-    "architect": """Ты — AI-помощник архитектора в компании «СтройКалькулятор».
-Помогаешь архитекторам:
-- Советуешь по планировочным решениям и типам домов
-- Помогаешь описать проект: особенности, преимущества, целевая аудитория
-- Объясняешь технические нюансы конструктива
-- Предлагаешь идеи для тегов и описаний проектов
-- Консультируешь по нормам и стандартам в строительстве
-- Помогаешь рассчитать базовые параметры проектов
-Отвечай профессионально, используй строительную терминологию.""",
+    "architect": """Ты — AI-ассистент архитектора в компании «СтройКалькулятор». Ты активный помощник, который СРАЗУ предлагает конкретные действия.
+
+Когда получаешь контекст проекта — анализируй что заполнено, а что нет, и предлагай следующий шаг.
+Умеешь:
+- Писать продающее описание проекта (2-3 предложения для клиента)
+- Генерировать список особенностей (5-7 пунктов через \\n)
+- Предлагать теги и цвета под тип дома
+- Советовать по планировкам, конструктиву, материалам
+- Подсказывать какие чертежи нужны и в каком порядке делать работу
+
+ВАЖНО: Когда просят сгенерировать описание или особенности — отвечай ТОЛЬКО JSON без markdown:
+{"description": "...", "features": "особ1\\nособ2\\nособ3"}
+или только нужное поле.
+
+Если просто консультируешь — отвечай обычным текстом, кратко и по делу.""",
 
     "constructor": """Ты — AI-помощник конструктора в компании «СтройКалькулятор».
 Помогаешь конструкторам:
@@ -282,6 +288,76 @@ def handler(event, context):
             return resp({"error": "Нет сообщений"}, 400)
         answer = get_openai_response(clean, role)
         return resp({"reply": answer})
+
+    # ── AI анализ проекта архитектором — генерирует описание, особенности, план ──
+    if action == "architect_analyze":
+        conn.close()
+        project = body.get("project", {})
+        if not project:
+            return resp({"error": "project обязателен"}, 400)
+
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if not api_key:
+            return resp({"error": "DEEPSEEK_API_KEY не настроен"}, 500)
+
+        has_desc = bool(project.get("description", "").strip())
+        has_features = bool(project.get("features", "").strip())
+        has_renders = project.get("renders_count", 0) > 0
+        has_spec = project.get("spec_items_count", 0) > 0
+
+        prompt = f"""Ты AI-ассистент архитектора. Проанализируй проект дома и выполни задачи.
+
+ПРОЕКТ:
+- Название: {project.get("name", "—")}
+- Тип: {project.get("type", "—")}
+- Площадь: {project.get("area", 0)} м²
+- Этажей: {project.get("floors", 0)}
+- Комнат: {project.get("rooms", 0)}
+- Цена: {project.get("price", 0)} ₽
+- Тег: {project.get("tag", "—")}
+- Кровля: {project.get("roof_type", "не указана")}
+- Фундамент: {project.get("foundation_type", "не указан")}
+- Стены: {project.get("wall_type", "не указаны")}
+- Описание: {"ЕСТЬ" if has_desc else "НЕТ — нужно заполнить"}
+- Особенности: {"ЕСТЬ" if has_features else "НЕТ — нужно заполнить"}
+- Рендеры: {"ЕСТЬ" if has_renders else "НЕТ — нужны изображения"}
+- Смета: {"ЕСТЬ" if has_spec else "НЕТ — нужна ведомость ОР"}
+
+ЗАДАЧА: Верни JSON со следующими полями:
+{{
+  "status": "краткая оценка готовности проекта (1 предложение)",
+  "next_steps": ["шаг 1", "шаг 2", "шаг 3"],
+  "description": "продающее описание проекта для клиента (2-3 предложения)",
+  "features": "особенность 1\\nособенность 2\\nособенность 3\\nособенность 4\\nособенность 5",
+  "tag_suggestion": "рекомендуемый тег если текущий плохой, иначе пустая строка"
+}}
+
+Описание — живой маркетинговый текст для покупателя. Особенности — конкретные, полезные, 5-7 штук."""
+
+        payload = json.dumps({
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "response_format": {"type": "json_object"},
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read().decode())
+
+        content = result["choices"][0]["message"]["content"]
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            parsed = {"status": "Анализ выполнен", "next_steps": [], "description": "", "features": "", "tag_suggestion": ""}
+
+        return resp({"ok": True, **parsed})
 
     # ── AI генерация проекта по предпочтениям заказчика ──
     if action == "ai_generate_project":
