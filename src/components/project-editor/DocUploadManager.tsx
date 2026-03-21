@@ -272,9 +272,18 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
         {totalPages === 0 && (
           <div className="flex-1 flex items-center justify-center py-16 text-center">
             <div>
-              <div className="text-4xl mb-3">📄</div>
-              <div className="text-sm text-white mb-1">Документ загружен и классифицирован</div>
-              <div className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>Не удалось извлечь текст. Возможно, документ содержит только изображения.</div>
+              <div className="text-4xl mb-3">🔍</div>
+              <div className="text-sm text-white mb-1">Документ-скан (PDF с изображениями)</div>
+              <div className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>
+                Встроенного текста не найдено. Нажмите «OCR-распознавание» — <br/>
+                AI прочитает текст со страниц через OCR и разберёт по позициям.
+              </div>
+              <button onClick={() => { setTotalPages(1); analyzePage(1); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium mx-auto"
+                style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+                <Icon name="ScanText" size={16} />
+                OCR-распознавание
+              </button>
             </div>
           </div>
         )}

@@ -356,34 +356,44 @@ def handler(event: dict, context) -> dict:
             conn.close(); return resp({"error": f"S3 ошибка: {e}"}, 500)
 
         url = cdn_url(final_key)
+        print(f"[spec-ai] saved file={file_name} size={len(file_bytes)} key={final_key}")
 
-        # Извлекаем текст (нативный или OCR для сканов)
-        print(f"[spec-ai] uploaded file={file_name} size={len(file_bytes)} key={final_key}")
-        extracted_text, _ = extract_text_from_file(file_bytes, file_name)
-        print(f"[spec-ai] extracted text={len(extracted_text)}")
+        # Пробуем нативное извлечение текста (быстро, без OCR)
+        extracted_text = extract_text_from_pdf_native(file_bytes) if file_name.lower().endswith(".pdf") else ""
+        if not extracted_text and file_name.lower().endswith((".xlsx", ".xls", ".csv")):
+            extracted_text, _ = extract_text_from_file(file_bytes, file_name)
+
+        print(f"[spec-ai] native text={len(extracted_text)} chars")
+        is_scan = len(extracted_text) < 200 and file_name.lower().endswith(".pdf")
         pages_text = split_text_into_pages(extracted_text) if extracted_text else []
 
-        # Классифицируем документ
+        # Классифицируем только если есть текст (быстро)
         doc_info = {"category": "other", "summary": ""}
         if extracted_text and os.environ.get("GIGACHAT_AUTH_KEY"):
             try: doc_info = classify_document(extracted_text)
             except Exception as e: print(f"[spec-ai] classify: {e}")
 
-        # Сохраняем страницы текста в pages_data (без items — анализ будет по запросу)
-        pages_data_init = [
-            {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False}
-            for i, p in enumerate(pages_text)
-        ]
+        # Для сканов — создаём одну "страницу" с флагом needs_ocr
+        if is_scan:
+            pages_data_init = [{"page": 1, "text": "", "text_preview": "", "items": [], "items_count": 0, "analyzed": False, "needs_ocr": True}]
+            pages_count = 1
+        else:
+            pages_data_init = [
+                {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False, "needs_ocr": False}
+                for i, p in enumerate(pages_text)
+            ]
+            pages_count = len(pages_text)
 
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO {S}.spec_uploads (project_id,file_name,file_url,status,uploaded_by,doc_category,page_count,pages_data) "
             f"VALUES (%s,%s,%s,'uploaded',%s,%s,%s,%s) RETURNING id",
             (project_id, file_name, url, staff["id"],
-             doc_info.get("category","other"), len(pages_text),
+             doc_info.get("category","other"), pages_count,
              json.dumps(pages_data_init, ensure_ascii=False)))
         db_upload_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
+        print(f"[spec-ai] saved upload_id={db_upload_id} pages={pages_count} is_scan={is_scan}")
 
         return resp({
             "ok": True,
@@ -417,6 +427,31 @@ def handler(event: dict, context) -> dict:
 
         items = []
         page_text = page_entry.get("text", page_entry.get("text_preview", "")) if page_entry else ""
+        needs_ocr = (page_entry or {}).get("needs_ocr", False)
+
+        # Для скан-документов — делаем OCR при первом обращении к странице
+        if needs_ocr and not page_text.strip():
+            cur2 = conn.cursor()
+            cur2.execute(f"SELECT file_url FROM {S}.spec_uploads WHERE id=%s", (upload_id,))
+            frow = cur2.fetchone(); cur2.close()
+            if frow:
+                s3_key_match = re.search(r'/bucket/(.+)$', frow[0])
+                if s3_key_match:
+                    try:
+                        s3c = s3()
+                        obj = s3c.get_object(Bucket="files", Key=s3_key_match.group(1))
+                        file_bytes = obj["Body"].read()
+                        print(f"[spec-ai] running OCR on scan, size={len(file_bytes)}")
+                        page_text = ocr_pdf_via_ocrspace(file_bytes)
+                        print(f"[spec-ai] OCR result: {len(page_text)} chars")
+                        # Сохраняем OCR-текст в pages_data чтобы не делать повторно
+                        pages_data = [
+                            {**p, "text": page_text, "text_preview": page_text[:400], "needs_ocr": False}
+                            if p.get("page") == page_num else p
+                            for p in pages_data
+                        ]
+                    except Exception as e:
+                        print(f"[spec-ai] OCR error: {e}")
 
         if page_text.strip() and os.environ.get("GIGACHAT_AUTH_KEY"):
             cur.execute(f"SELECT name,unit,price_per_unit,category FROM {S}.materials WHERE is_active=TRUE ORDER BY category,name LIMIT 100")
