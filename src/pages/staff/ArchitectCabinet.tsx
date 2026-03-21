@@ -55,12 +55,13 @@ async function uploadFileChunked(
 const HOUSE_TYPES = ["Кирпичный", "Каркасный", "Монолитный", "Деревянный", "Газобетон", "Модульный"];
 const TAG_COLORS = ["#FF6B1A", "#00D4FF", "#00FF88", "#A855F7", "#FBBF24", "#EC4899"];
 const FILE_TYPES = [
-  { id: "render", label: "Рендер фасада", icon: "Image" },
-  { id: "plan", label: "План", icon: "LayoutGrid" },
-  { id: "facade", label: "Фасад", icon: "Building2" },
-  { id: "section", label: "Разрез", icon: "Scissors" },
-  { id: "spec", label: "Спецификация", icon: "FileText" },
-  { id: "other", label: "Прочее", icon: "File" },
+  { id: "render", label: "Рендер фасада", icon: "Image", accept: "image/*" },
+  { id: "plan", label: "План", icon: "LayoutGrid", accept: "image/*,.pdf,.dwg,.dxf" },
+  { id: "facade", label: "Фасад", icon: "Building2", accept: "image/*,.pdf,.dwg,.dxf" },
+  { id: "section", label: "Разрез", icon: "Scissors", accept: "image/*,.pdf,.dwg,.dxf" },
+  { id: "spec", label: "Спецификация", icon: "FileText", accept: "image/*,.pdf,.xlsx,.xls,.csv,.dwg" },
+  { id: "project_full", label: "Весь проект", icon: "FolderArchive", accept: "image/*,.pdf,.xlsx,.xls,.csv,.dwg,.dxf,.zip,.rar,.7z" },
+  { id: "other", label: "Прочее", icon: "File", accept: "image/*,.pdf,.xlsx,.xls,.csv,.dwg,.dxf,.zip,.rar,.7z" },
 ];
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -842,6 +843,8 @@ function AiAssistantTab({ proj, token, onApply }: {
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [filesAnalysis, setFilesAnalysis] = useState<string | null>(null);
+  const [filesAnalysisLoading, setFilesAnalysisLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const analyze = async () => {
@@ -876,6 +879,26 @@ function AiAssistantTab({ proj, token, onApply }: {
     setApplying(null);
     setApplied(prev => new Set([...prev, field]));
     onApply({ [field]: value });
+  };
+
+  const analyzeFiles = async () => {
+    const files = proj.files || [];
+    if (files.length === 0) return;
+    setFilesAnalysisLoading(true); setFilesAnalysis(null);
+    const filesList = files.map(f => `• ${f.file_name} (${f.file_type})`).join("\n");
+    const context = `Проект "${proj.name}", ${proj.type}, ${proj.area}м², ${proj.floors} эт. Загруженные файлы:\n${filesList}`;
+    const r = await apiFetch(`${AI_URL}?action=chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        messages: [
+          { role: "user", content: context },
+          { role: "user", content: "Ты — опытный архитектор. На основе списка загруженных файлов проекта определи: какие чертежи уже есть, каких не хватает (план этажей, разрезы, фасады, узлы), и дай краткие рекомендации по спецификации материалов. Ответь структурированно." }
+        ],
+        role: "architect"
+      }),
+    }, token);
+    setFilesAnalysisLoading(false);
+    if (r.reply) setFilesAnalysis(r.reply);
   };
 
   const sendChat = async () => {
@@ -1020,6 +1043,65 @@ function AiAssistantTab({ proj, token, onApply }: {
         )}
       </div>
 
+      {/* Анализ чертежей и спецификаций */}
+      {(proj.files || []).length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(0,255,136,0.2)" }}>
+          <div className="px-5 py-4 flex items-center justify-between"
+            style={{ background: "linear-gradient(135deg, rgba(0,255,136,0.08), rgba(0,212,255,0.05))" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(0,255,136,0.12)" }}>
+                <Icon name="FileSearch" size={18} style={{ color: "var(--neon-green)" }} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">Анализ чертежей и спецификаций</p>
+                <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  AI проверит загруженные файлы и выявит недостающее
+                </p>
+              </div>
+            </div>
+            <button onClick={analyzeFiles} disabled={filesAnalysisLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105 disabled:opacity-50"
+              style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.25)" }}>
+              <Icon name={filesAnalysisLoading ? "Loader2" : "ScanSearch"} size={12} className={filesAnalysisLoading ? "animate-spin" : ""} />
+              {filesAnalysisLoading ? "Читаю..." : "Прочитать"}
+            </button>
+          </div>
+          {filesAnalysisLoading && (
+            <div className="px-5 py-8 text-center">
+              <div className="w-8 h-8 border-2 border-white/10 rounded-full mx-auto mb-3 animate-spin"
+                style={{ borderTopColor: "var(--neon-green)" }} />
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+                Анализирую {(proj.files || []).length} файл(ов)...
+              </p>
+            </div>
+          )}
+          {filesAnalysis && !filesAnalysisLoading && (
+            <div className="p-5">
+              <div className="text-sm leading-relaxed whitespace-pre-line"
+                style={{ color: "rgba(255,255,255,0.75)" }}>
+                {filesAnalysis}
+              </div>
+              <button
+                onClick={() => {
+                  setChat(prev => [...prev, { role: "user", content: `Результат анализа чертежей:\n${filesAnalysis}` }]);
+                  setInput("Что нужно доработать в первую очередь?");
+                }}
+                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105"
+                style={{ background: "rgba(168,85,247,0.1)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.2)" }}>
+                <Icon name="MessageCircle" size={12} />
+                Обсудить в чате
+              </button>
+            </div>
+          )}
+          {!filesAnalysis && !filesAnalysisLoading && (
+            <div className="px-5 py-5 text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>
+              Загружено {(proj.files || []).length} файл(ов) — нажмите «Прочитать», чтобы AI проверил чертежи и спецификации
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Чат с AI */}
       <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(168,85,247,0.2)" }}>
         <div className="px-5 py-3 flex items-center gap-2"
@@ -1033,7 +1115,7 @@ function AiAssistantTab({ proj, token, onApply }: {
             <div className="text-center py-6">
               <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Задайте вопрос по проекту</p>
               <div className="flex flex-wrap gap-2 justify-center mt-3">
-                {["Как улучшить описание?", "Какие особенности добавить?", "Что указать в теге?"].map(s => (
+                {["Как улучшить описание?", "Каких чертежей не хватает?", "Что указать в спецификации?"].map(s => (
                   <button key={s} onClick={() => setInput(s)}
                     className="px-3 py-1.5 rounded-lg text-xs transition-all hover:scale-105"
                     style={{ background: "rgba(168,85,247,0.1)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.2)" }}>
@@ -1253,27 +1335,53 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
                 <button key={ft.id} onClick={() => setSelectedFileType(ft.id)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                   style={{
-                    background: selectedFileType === ft.id ? "var(--neon-orange)" : "rgba(255,255,255,0.06)",
+                    background: selectedFileType === ft.id ? (ft.id === "project_full" ? "var(--neon-cyan)" : "var(--neon-orange)") : "rgba(255,255,255,0.06)",
                     color: selectedFileType === ft.id ? "#fff" : "rgba(255,255,255,0.5)",
+                    border: ft.id === "project_full" && selectedFileType !== ft.id ? "1px dashed rgba(0,212,255,0.3)" : "1px solid transparent",
                   }}>
                   <Icon name={ft.icon} size={12} />
                   {ft.label}
                 </button>
               ))}
             </div>
+
+            {/* Подсказка форматов */}
+            {(() => {
+              const ft = FILE_TYPES.find(f => f.id === selectedFileType);
+              const formats = ft?.accept.split(",").map(s => s.trim().replace("image/*","JPG/PNG").replace(".",".").toUpperCase()).join(" · ");
+              const isProject = selectedFileType === "project_full";
+              return (
+                <div className="mb-3 text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.35)" }}>
+                  {isProject ? (
+                    <span>📦 Архив всего проекта — ZIP, RAR или отдельный файл любого формата</span>
+                  ) : (
+                    <span>Допустимые форматы: <span style={{ color: "rgba(255,255,255,0.55)" }}>{formats}</span></span>
+                  )}
+                </div>
+              );
+            })()}
+
             <input ref={fileRef} type="file"
-              accept={["render","facade","plan","section"].includes(selectedFileType) ? "image/*" : "image/*,.pdf,.xlsx,.xls,.csv"}
+              accept={FILE_TYPES.find(f => f.id === selectedFileType)?.accept ?? "image/*"}
               className="hidden"
               onChange={e => e.target.files?.[0] && uploadFile(e.target.files[0])} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
-              style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
-              <Icon name={uploading ? "Loader" : "Upload"} size={15} />
-              {uploading ? `Загрузка... ${uploadProgress}%` : (["render","facade","plan","section"].includes(selectedFileType) ? "Выбрать изображение" : "Выбрать файл (фото, PDF)")}
+              style={selectedFileType === "project_full"
+                ? { background: "rgba(0,212,255,0.12)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.3)" }
+                : { background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+              <Icon name={uploading ? "Loader" : (selectedFileType === "project_full" ? "FolderArchive" : "Upload")} size={15} />
+              {uploading
+                ? `Загрузка... ${uploadProgress}%`
+                : selectedFileType === "project_full"
+                  ? "Загрузить весь проект"
+                  : selectedFileType === "render"
+                    ? "Выбрать изображение"
+                    : "Выбрать файл"}
             </button>
             {uploading && uploadProgress > 0 && (
               <div className="mt-2 w-full rounded-full overflow-hidden" style={{ height: 4, background: "rgba(255,255,255,0.08)" }}>
-                <div className="h-full rounded-full transition-all" style={{ width: `${uploadProgress}%`, background: "var(--neon-orange)" }} />
+                <div className="h-full rounded-full transition-all" style={{ width: `${uploadProgress}%`, background: selectedFileType === "project_full" ? "var(--neon-cyan)" : "var(--neon-orange)" }} />
               </div>
             )}
             {uploadMsg && <div className="mt-2 text-sm" style={{ color: uploadMsg.includes("!") ? "var(--neon-green)" : "#ef4444" }}>{uploadMsg}</div>}
@@ -1291,13 +1399,17 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
                 {ft.files.map(file => (
                   <div key={file.id} className="rounded-xl overflow-hidden group relative"
                     style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
-                    {file.file_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                    {file.file_url.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ? (
                       <img src={file.file_url} alt={file.file_name} className="w-full h-32 object-cover" />
                     ) : (
                       <a href={file.file_url} target="_blank" rel="noreferrer"
                         className="flex flex-col items-center justify-center h-32 gap-2"
                         style={{ background: "rgba(255,255,255,0.04)" }}>
-                        <Icon name="FileText" size={28} style={{ color: "var(--neon-orange)" }} />
+                        {file.file_url.match(/\.pdf$/i) && <Icon name="FileText" size={28} style={{ color: "#ef4444" }} />}
+                        {file.file_url.match(/\.(xlsx|xls|csv)$/i) && <Icon name="FileSpreadsheet" size={28} style={{ color: "#22c55e" }} />}
+                        {file.file_url.match(/\.(dwg|dxf)$/i) && <Icon name="Pencil" size={28} style={{ color: "var(--neon-cyan)" }} />}
+                        {file.file_url.match(/\.(zip|rar|7z)$/i) && <Icon name="FolderArchive" size={28} style={{ color: "var(--neon-cyan)" }} />}
+                        {!file.file_url.match(/\.(pdf|xlsx|xls|csv|dwg|dxf|zip|rar|7z)$/i) && <Icon name="File" size={28} style={{ color: "var(--neon-orange)" }} />}
                         <span className="text-xs text-center px-2" style={{ color: "rgba(255,255,255,0.5)" }}>{file.file_name}</span>
                       </a>
                     )}
