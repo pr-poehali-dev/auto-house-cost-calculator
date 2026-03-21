@@ -532,8 +532,13 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"SELECT name,unit,price_per_unit,category FROM {S}.materials WHERE is_active=TRUE ORDER BY category,name LIMIT 100")
             mats = cur.fetchall()
             mat_ctx = "\n".join([f"{r[3]}|{r[0]}|{r[1]}|{r[2]}₽" for r in mats])
+            # Добавляем нормативный контекст
+            cur.execute(f"SELECT title,doc_number,content FROM {S}.norm_documents WHERE is_active=TRUE ORDER BY created_at DESC LIMIT 10")
+            norms = cur.fetchall()
+            norm_ctx = "\n\n".join([f"[{r[1] or r[0]}]: {r[2][:300]}" for r in norms if r[2]]) if norms else ""
             try:
-                prompt = f"{SPEC_PROMPT}\n\nМатериалы:\n{mat_ctx}\n\nСтраница {page_num}:\n{page_text[:6000]}"
+                norm_section = f"\n\nНормативная база:\n{norm_ctx}" if norm_ctx else ""
+                prompt = f"{SPEC_PROMPT}{norm_section}\n\nМатериалы:\n{mat_ctx}\n\nСтраница {page_num}:\n{page_text[:6000]}"
                 content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
                 items = _parse_items(content)
                 print(f"[spec-ai] page {page_num}: {len(items)} items")
@@ -630,6 +635,125 @@ def handler(event: dict, context) -> dict:
             "doc_category": r[7], "page_count": r[8], "pages": r[9] or [],
             "doc_category_label": DOC_CATEGORIES.get(r[7] or "other", "Прочее"),
         }})
+
+    # ── Удалить загрузку ─────────────────────────────────────────────────────
+    if method == "POST" and action == "delete_upload":
+        upload_id = body.get("upload_id")
+        if not upload_id:
+            conn.close(); return resp({"error": "upload_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"SELECT file_url FROM {S}.spec_uploads WHERE id=%s", (upload_id,))
+        row = cur.fetchone()
+        if row:
+            # Удаляем файл из S3
+            try:
+                s3_key_match = re.search(r'/bucket/(.+)$', row[0])
+                if s3_key_match:
+                    s3().delete_object(Bucket="files", Key=s3_key_match.group(1))
+            except Exception as e:
+                print(f"[spec-ai] s3 delete error: {e}")
+            cur.execute(f"DELETE FROM {S}.spec_uploads WHERE id=%s", (upload_id,))
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    # ── Нормативные документы: список ────────────────────────────────────────
+    if method == "GET" and action == "norms_list":
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id,title,doc_type,doc_number,content,file_url,file_name,is_active,created_at "
+            f"FROM {S}.norm_documents WHERE is_active=TRUE ORDER BY doc_type,title")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return resp({"norms": [{
+            "id": r[0], "title": r[1], "doc_type": r[2], "doc_number": r[3],
+            "content": r[4][:500] if r[4] else "", "file_url": r[5], "file_name": r[6],
+            "is_active": r[7], "created_at": str(r[8]),
+        } for r in rows]})
+
+    # ── Нормативные документы: добавить текст/выдержку ───────────────────────
+    if method == "POST" and action == "norm_add":
+        title = body.get("title", "").strip()
+        doc_type = body.get("doc_type", "norm")
+        doc_number = body.get("doc_number", "").strip()
+        content = body.get("content", "").strip()
+        if not title:
+            conn.close(); return resp({"error": "title обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO {S}.norm_documents (title,doc_type,doc_number,content,uploaded_by) "
+            f"VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (title, doc_type, doc_number, content, staff["id"]))
+        nid = cur.fetchone()[0]
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True, "id": nid})
+
+    # ── Нормативные документы: загрузить PDF ─────────────────────────────────
+    if method == "POST" and action == "norm_upload_chunk":
+        title = body.get("title", "").strip()
+        doc_type = body.get("doc_type", "norm")
+        doc_number = body.get("doc_number", "").strip()
+        file_name = body.get("file_name", "norm.pdf")
+        chunk_b64 = body.get("chunk", "")
+        chunk_index = int(body.get("chunk_index", 0))
+        total_chunks = int(body.get("total_chunks", 1))
+        upload_sess = body.get("upload_id", "")
+
+        if not chunk_b64:
+            conn.close(); return resp({"error": "chunk обязателен"}, 400)
+
+        import mimetypes as _mt2
+        safe_name = re.sub(r"[^\w.\-]", "_", file_name)
+        final_key = f"norms/{safe_name}"
+        s3c = s3()
+
+        try:
+            if total_chunks == 1:
+                file_bytes = base64.b64decode(chunk_b64)
+                s3c.put_object(Bucket="files", Key=final_key, Body=file_bytes,
+                               ContentType=_mt2.guess_type(safe_name)[0] or "application/octet-stream")
+            else:
+                if not upload_sess:
+                    upload_sess = str(uuid.uuid4())
+                s3c.put_object(Bucket="files", Key=f"_tmp/{upload_sess}/chunk_{chunk_index:05d}",
+                               Body=base64.b64decode(chunk_b64), ContentType="application/octet-stream")
+                if chunk_index < total_chunks - 1:
+                    conn.close()
+                    return resp({"ok": True, "done": False, "upload_id": upload_sess})
+                all_bytes = b""
+                for i in range(total_chunks):
+                    obj = s3c.get_object(Bucket="files", Key=f"_tmp/{upload_sess}/chunk_{i:05d}")
+                    all_bytes += obj["Body"].read()
+                file_bytes = all_bytes
+                s3c.put_object(Bucket="files", Key=final_key, Body=file_bytes,
+                               ContentType=_mt2.guess_type(safe_name)[0] or "application/octet-stream")
+                for i in range(total_chunks):
+                    try: s3c.delete_object(Bucket="files", Key=f"_tmp/{upload_sess}/chunk_{i:05d}")
+                    except: pass
+        except Exception as e:
+            conn.close(); return resp({"error": f"S3 ошибка: {e}"}, 500)
+
+        norm_url = cdn_url(final_key)
+        # Извлекаем текст для поиска
+        extracted = extract_text_from_pdf_native(file_bytes) if file_name.lower().endswith(".pdf") else ""
+        content_snippet = extracted[:5000] if extracted else ""
+
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO {S}.norm_documents (title,doc_type,doc_number,content,file_url,file_name,uploaded_by) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (title or file_name, doc_type, doc_number, content_snippet, norm_url, file_name, staff["id"]))
+        nid = cur.fetchone()[0]
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True, "done": True, "id": nid, "file_url": norm_url})
+
+    # ── Нормативные документы: удалить ───────────────────────────────────────
+    if method == "POST" and action == "norm_delete":
+        nid = body.get("norm_id")
+        if not nid:
+            conn.close(); return resp({"error": "norm_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {S}.norm_documents SET is_active=FALSE WHERE id=%s", (nid,))
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
 
     conn.close()
     return resp({"error": "Not found"}, 404)

@@ -224,6 +224,17 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
   const currentPageData = pages.find(p => p.page === currentPage);
   const analyzedCount = pages.length;
   const totalSelected = selectedItems.size;
+  const deleteUpload = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Удалить документ?")) return;
+    await apiFetch(`${AI_URL}?action=delete_upload`, {
+      method: "POST",
+      body: JSON.stringify({ upload_id: id }),
+    }, token);
+    setUploads(prev => prev.filter(u => u.id !== id));
+    if (activeDoc?.id === id) setActiveDoc(null);
+  };
+
   const byCategory = (cat: string) => uploads.filter(u => cat === "all" || (u.doc_category || "other") === cat);
   const cats = ["all", ...Array.from(new Set(uploads.map(u => u.doc_category || "other")))];
 
@@ -516,7 +527,14 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
                     <span>{new Date(doc.created_at).toLocaleDateString("ru-RU")}</span>
                   </div>
                 </div>
-                <Icon name="ChevronRight" size={16} style={{ color: "rgba(255,255,255,0.2)", flexShrink: 0 }} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <button onClick={(e) => deleteUpload(doc.id, e)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-500/20 transition-colors"
+                    style={{ color: "#ef4444" }}>
+                    <Icon name="Trash2" size={13} />
+                  </button>
+                  <Icon name="ChevronRight" size={16} style={{ color: "rgba(255,255,255,0.2)" }} />
+                </div>
               </div>
             );
           })}

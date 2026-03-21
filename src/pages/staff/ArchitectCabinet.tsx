@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
+import NormDocuments from "@/components/project-editor/NormDocuments";
 import type { AiItem } from "@/pages/staff/materials-types";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
@@ -1170,7 +1171,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech">("ai");
+  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech" | "norms">("ai");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -1294,6 +1295,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     { id: "docs", label: "Документация", icon: "FolderOpen", highlight: pendingDocItems ? pendingDocItems.length : 0 },
     { id: "spec", label: "Ведомость ОР", icon: "FileSpreadsheet" },
     { id: "tech", label: "Тех. карты", icon: "BookOpen" },
+    { id: "norms", label: "Нормативы", icon: "BookMarked" },
   ] as const;
 
   const filesByType = FILE_TYPES.map(ft => ({
@@ -1651,6 +1653,11 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
       {/* ── Тех. карты ── */}
       {tab === "tech" && (
         <TechTab proj={proj} token={token} onOpenLibrary={() => setShowTechCards(true)} />
+      )}
+
+      {/* ── Нормативные документы ── */}
+      {tab === "norms" && (
+        <NormDocuments token={token} />
       )}
 
       {showTechCards && (
