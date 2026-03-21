@@ -118,6 +118,117 @@ def handler(event: dict, context) -> dict:
         cur.close(); conn.close()
         return resp({"project": p})
 
+    # GET estimate from tech cards (public) — смета из ТТК по типу дома
+    if method == "GET" and action == "estimate_from_ttk":
+        pid = qs.get("project_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"SELECT type,area,floors,rooms,price,roof_type,foundation_type,wall_type FROM {S}.house_projects WHERE id=%s AND is_active=TRUE", (pid,))
+        pr = cur.fetchone()
+        if not pr: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
+        house_type, area, floors, rooms, price, roof_type, foundation_type, wall_type = pr
+
+        # Подбираем ТТК по типу дома и составу работ
+        # Фундамент
+        if foundation_type and "свай" in foundation_type.lower():
+            found_ids = [14]
+        elif foundation_type and "плит" in foundation_type.lower():
+            found_ids = [13]
+        else:
+            found_ids = [2]
+
+        # Стены — по типу дома
+        type_lower = house_type.lower()
+        if "каркас" in type_lower:
+            wall_ids = [19]
+        elif "сип" in type_lower or "модул" in type_lower:
+            wall_ids = [20]
+        elif "газобетон" in type_lower or "газо" in type_lower:
+            wall_ids = [18]
+        elif "кирпич" in type_lower:
+            wall_ids = [1]
+        else:
+            wall_ids = [19]  # по умолчанию каркас
+
+        # Кровля — по типу кровли
+        if roof_type and ("металло" in roof_type.lower() or "металлочерепиц" in roof_type.lower()):
+            roof_ids = [3, 10]
+        elif roof_type and ("профнастил" in roof_type.lower() or "профл" in roof_type.lower()):
+            roof_ids = [3, 11]
+        elif roof_type and ("мягк" in roof_type.lower() or "гибк" in roof_type.lower() or "битум" in roof_type.lower()):
+            roof_ids = [3, 12]
+        elif "каркас" in type_lower:
+            roof_ids = [21]
+        else:
+            roof_ids = [3, 10]
+
+        # Стандартный набор остальных ТТК
+        base_ids = [4, 17, 5, 6, 15, 16]
+
+        all_ids = found_ids + wall_ids + roof_ids + base_ids
+        cur.execute(f"SELECT id,title,category,materials FROM {S}.tech_cards WHERE id=ANY(%s) AND is_active=TRUE", (all_ids,))
+        ttk_rows = cur.fetchall()
+        cur.close()
+
+        # Стоимость по разделам (доля от общей цены)
+        section_budget = {
+            "Фундамент":    price * 0.14,
+            "Стены":        price * 0.22,
+            "Кровля":       price * 0.10,
+            "Полы":         price * 0.06,
+            "Инженерия":    price * 0.16,
+            "Окна и двери": price * 0.07,
+            "Отделка":      price * 0.09,
+            "Электрика":    price * 0.06,
+        }
+
+        # Поверхность кровли ~1.35 от площади для двускатной
+        roof_area = round(area * 1.35, 1)
+
+        items = []
+        item_id = 1
+        for row in ttk_rows:
+            ttk_id, ttk_title, category, materials = row
+            if not materials: continue
+            # Определяем базовую площадь для расчёта количества
+            if category in ("Кровля",):
+                base_qty = roof_area
+            elif category in ("Полы",):
+                base_qty = area * floors
+            elif category in ("Отделка",):
+                base_qty = area * floors
+            else:
+                base_qty = area
+
+            # Считаем количество позиций ТТК с qty_per_unit > 0
+            valid_mats = [m for m in materials if m.get("qty_per_unit", 0) > 0]
+            if not valid_mats: continue
+
+            # Получаем бюджет раздела и делим между ТТК того же раздела
+            ttk_in_section = [r for r in ttk_rows if r[2] == category]
+            budget_per_ttk = section_budget.get(category, price * 0.05) / max(len(ttk_in_section), 1)
+
+            for mat in valid_mats:
+                qty = round(mat["qty_per_unit"] * base_qty, 2)
+                if qty <= 0: continue
+                # Распределяем бюджет раздела по материалам равномерно
+                price_per_unit = round(budget_per_ttk / (len(valid_mats) * qty), 2) if qty > 0 else 0
+                total = round(price_per_unit * qty, 2)
+                items.append({
+                    "id": item_id,
+                    "section": f"{category} / {ttk_title}",
+                    "name": mat["name"],
+                    "unit": mat.get("unit", "шт"),
+                    "qty": qty,
+                    "price_per_unit": price_per_unit,
+                    "total_price": total,
+                    "note": mat.get("note", ""),
+                })
+                item_id += 1
+
+        conn.close()
+        return resp({"ok": True, "items": items, "source": "ttk"})
+
     # ── Авторизованные endpoint'ы ─────────────────────────────────────────────
     if not token: conn.close(); return resp({"error":"Не авторизован"}, 401)
     staff = get_staff(conn, token)

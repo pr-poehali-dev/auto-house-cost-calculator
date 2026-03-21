@@ -19,37 +19,7 @@ interface Project {
   files: ProjectFile[]; specs?: Spec[]; spec?: Spec | null;
 }
 
-// Расчётная смета на основе площади — показывается если реальной нет
-function buildEstimate(area: number, price: number): SpecItem[] {
-  const shares: [string, string, number][] = [
-    ["Фундамент", "Устройство монолитного фундамента", 0.12],
-    ["Фундамент", "Гидроизоляция фундамента", 0.02],
-    ["Стены", "Кладка / монтаж несущих стен", 0.22],
-    ["Стены", "Утепление и облицовка фасада", 0.06],
-    ["Перекрытия", "Устройство межэтажного перекрытия", 0.07],
-    ["Кровля", "Стропильная система", 0.05],
-    ["Кровля", "Кровельное покрытие и водосток", 0.04],
-    ["Окна и двери", "Поставка и монтаж окон", 0.06],
-    ["Окна и двери", "Входная и межкомнатные двери", 0.03],
-    ["Инженерия", "Отопление и тёплый пол", 0.07],
-    ["Инженерия", "Водоснабжение и канализация", 0.05],
-    ["Инженерия", "Электромонтаж", 0.04],
-    ["Отделка", "Черновая отделка стен и полов", 0.08],
-    ["Отделка", "Чистовая отделка (покраска, плитка)", 0.06],
-    ["Прочее", "Благоустройство и отмостка", 0.02],
-    ["Прочее", "Непредвиденные расходы (резерв 3%)", 0.01],
-  ];
-  return shares.map(([ section, name, share], idx) => ({
-    id: idx + 1,
-    section,
-    name,
-    unit: "м²",
-    qty: area,
-    price_per_unit: Math.round((price * share) / area),
-    total_price: Math.round(price * share),
-    note: "",
-  }));
-}
+
 
 const FILE_TYPE_LABELS: Record<string, string> = {
   render: "Рендер", plan: "План этажа", facade: "Фасад", section: "Разрез", spec: "Спецификация", other: "Документ",
@@ -68,6 +38,8 @@ export default function ProjectDetail() {
   const [activeImage, setActiveImage] = useState(0);
   const [activeTab, setActiveTab] = useState<"overview" | "drawings" | "spec" | "request">("overview");
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+  const [ttkItems, setTtkItems] = useState<SpecItem[] | null>(null);
+  const [loadingTtk, setLoadingTtk] = useState(false);
 
   // Форма заявки
   const [form, setForm] = useState({ name: "", phone: "", comment: "" });
@@ -85,6 +57,17 @@ export default function ProjectDetail() {
       })
       .catch(() => { setNotFound(true); setLoading(false); });
   }, [id]);
+
+  // Загружаем ТТК-смету при открытии вкладки (только если нет реальной)
+  useEffect(() => {
+    if (activeTab !== "spec" || !project || ttkItems !== null || loadingTtk) return;
+    if (project.spec?.items?.length) return; // есть реальная — не нужна
+    setLoadingTtk(true);
+    fetch(`${PROJECTS_API}?action=estimate_from_ttk&project_id=${project.id}`)
+      .then(r => r.json())
+      .then(r => { setTtkItems(r.items || []); setLoadingTtk(false); })
+      .catch(() => { setTtkItems([]); setLoadingTtk(false); });
+  }, [activeTab, project, ttkItems, loadingTtk]);
 
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,12 +124,13 @@ export default function ProjectDetail() {
   const features = project.features ? project.features.split("\n").filter(Boolean) : [];
   const tagColor = project.tag_color || "#FF6B1A";
 
-  // Смета: реальная из БД или расчётная по площади
+  // Смета: реальная из БД → из ТТК → ничего (загружается)
   const realSpec = project.spec;
-  const isEstimate = !realSpec?.items?.length;
-  const specItems: SpecItem[] = realSpec?.items?.length
-    ? realSpec.items
-    : buildEstimate(project.area, project.price);
+  const hasRealSpec = !!(realSpec?.items?.length);
+  const isEstimate = !hasRealSpec;
+  const specItems: SpecItem[] = hasRealSpec
+    ? realSpec!.items!
+    : (ttkItems || []);
 
   const specSections = Array.from(new Set(specItems.map(i => i.section))).map((section, idx) => ({
     section,
@@ -470,17 +454,27 @@ export default function ProjectDetail() {
         {/* ── Смета ── */}
         {activeTab === "spec" && (
           <div className="animate-fade-in">
+            {loadingTtk ? (
+              <div className="text-center py-20">
+                <div className="w-10 h-10 border-2 border-white/10 rounded-full mx-auto mb-4 animate-spin"
+                  style={{ borderTopColor: tagColor }} />
+                <p className="text-sm font-semibold text-white mb-1">Формируем смету по техкартам...</p>
+                <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                  Подбираем материалы для {project.type.toLowerCase()} дома {project.area} м²
+                </p>
+              </div>
+            ) : (
               <div className="space-y-4">
-                {/* Баннер: расчётная или утверждённая */}
+                {/* Баннер: из ТТК или утверждённая */}
                 {isEstimate ? (
                   <div className="rounded-2xl p-4 flex items-start gap-3"
-                    style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
-                    <Icon name="Info" size={16} style={{ color: "#FBBF24", flexShrink: 0, marginTop: 2 }} />
+                    style={{ background: "rgba(0,212,255,0.07)", border: "1px solid rgba(0,212,255,0.2)" }}>
+                    <Icon name="Sparkles" size={16} style={{ color: "#00D4FF", flexShrink: 0, marginTop: 2 }} />
                     <div>
-                      <p className="text-sm font-semibold text-white mb-0.5">Предварительная расчётная смета</p>
+                      <p className="text-sm font-semibold text-white mb-0.5">Предварительная смета по технологическим картам</p>
                       <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
-                        Детальная смета с реальными ценами от поставщиков появится после завершения проектирования.
-                        Сейчас показан ориентировочный расчёт на основе стоимости {fmt(project.price)} ₽ и площади {project.area} м².
+                        Рассчитана автоматически по нормам расхода материалов из наших ТТК для {project.type.toLowerCase()} дома {project.area} м².
+                        Конструктор уточнит позиции и цены после разработки рабочего проекта.
                       </p>
                     </div>
                   </div>
@@ -572,6 +566,7 @@ export default function ProjectDetail() {
                   );
                 })}
               </div>
+            )}
           </div>
         )}
 
