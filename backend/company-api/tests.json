@@ -1,0 +1,4 @@
+{"tests": [
+  {"name": "Get settings public", "method": "GET", "path": "/?action=settings", "expectedStatus": 200, "expectedBody": {"settings": {}}, "bodyMatcher": "partial"},
+  {"name": "Save without token", "method": "POST", "path": "/?action=save_settings", "expectedStatus": 401}
+]}

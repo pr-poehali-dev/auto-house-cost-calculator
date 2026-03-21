@@ -1,4 +1,6 @@
 {
+  "order-api": "https://functions.poehali.dev/5cd1eb69-9a08-4572-ae2a-bc11e49da506",
+  "company-api": "https://functions.poehali.dev/0796a927-18d1-46be-bd26-3bbcfe93738d",
   "ttk-api": "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62",
   "spec-ai": "https://functions.poehali.dev/8ecbdbca-904c-4ffc-a3b2-3279170e95ee",
   "supplier-api": "https://functions.poehali.dev/0864e1a5-8fce-4370-a525-80d6700b50ee",

@@ -5,6 +5,8 @@ import ProjectPanel from "@/components/ProjectEditor";
 import ArchitectCabinetNew from "./staff/ArchitectCabinet";
 import MaterialsDB from "./staff/MaterialsDB";
 import TechCardsDB from "./staff/TechCardsDB";
+import CompanySettings from "./staff/CompanySettings";
+import SalesManager from "./staff/SalesManager";
 
 const AUTH_URL = "https://functions.poehali.dev/b313eb2b-033b-49ed-a7e1-33dd33b4938b";
 const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
@@ -56,6 +58,9 @@ const ROLE_LABELS: Record<string, string> = {
   engineer: "Инженер",
   lawyer: "Юрист",
   supply: "Снабженец",
+  manager: "Менеджер",
+  build_manager: "Рук. строительства",
+  admin: "Администратор",
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -64,6 +69,9 @@ const ROLE_COLORS: Record<string, string> = {
   engineer: "#00FF88",
   lawyer: "#A855F7",
   supply: "#FBBF24",
+  manager: "#F472B6",
+  build_manager: "#FB923C",
+  admin: "#E11D48",
 };
 
 const ROLE_ICONS: Record<string, string> = {
@@ -72,6 +80,9 @@ const ROLE_ICONS: Record<string, string> = {
   engineer: "Settings",
   lawyer: "Scale",
   supply: "ShoppingCart",
+  manager: "Phone",
+  build_manager: "HardHat",
+  admin: "ShieldCheck",
 };
 
 function authFetch(url: string, opts: RequestInit = {}, token?: string) {
@@ -92,6 +103,9 @@ const ROLES = [
   { code: "engineer", label: "Инженер" },
   { code: "lawyer", label: "Юрист" },
   { code: "supply", label: "Снабженец" },
+  { code: "manager", label: "Менеджер по продажам" },
+  { code: "build_manager", label: "Руководитель строительства" },
+  { code: "admin", label: "Администратор" },
 ];
 
 function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) => void }) {
@@ -227,7 +241,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: StaffUser, token: string) =>
 // ─── Dashboard shell ───────────────────────────────────────────────────────────
 function DashboardShell({ user, token, onLogout, children, globalTab, onGlobalTab }: {
   user: StaffUser; token: string; onLogout: () => void; children: React.ReactNode;
-  globalTab: string; onGlobalTab: (t: "main"|"ttk") => void;
+  globalTab: string; onGlobalTab: (t: "main"|"ttk"|"settings") => void;
 }) {
   const color = ROLE_COLORS[user.role_code] || "#fff";
   const icon = ROLE_ICONS[user.role_code] || "User";
@@ -267,6 +281,14 @@ function DashboardShell({ user, token, onLogout, children, globalTab, onGlobalTa
               <Icon name="BookOpen" size={13} />
               <span className="hidden sm:inline">Тех. карты</span>
             </button>
+            {["admin","architect","manager"].includes(user.role_code) && (
+              <button onClick={() => onGlobalTab("settings")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                style={{ background: globalTab === "settings" ? "#FBBF24" : "transparent", color: globalTab === "settings" ? "#000" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <Icon name="Settings" size={13} />
+                <span className="hidden sm:inline">Настройки</span>
+              </button>
+            )}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
               style={{ background: `${color}18`, border: `1px solid ${color}44` }}>
               <Icon name={icon} size={13} style={{ color }} />
@@ -1362,7 +1384,7 @@ export default function Staff() {
   const [user, setUser] = useState<StaffUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
-  const [globalTab, setGlobalTab] = useState<"main"|"ttk">("main");
+  const [globalTab, setGlobalTab] = useState<"main"|"ttk"|"settings">("main");
 
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY);
@@ -1397,10 +1419,12 @@ export default function Staff() {
 
   const renderCabinet = () => {
     if (globalTab === "ttk") return <TechCardsDB token={token} />;
+    if (globalTab === "settings") return <CompanySettings token={token} />;
     switch (user.role_code) {
       case "architect": return <ArchitectCabinetNew user={user} token={token} />;
       case "constructor": return <ConstructorCabinet user={user} token={token} />;
       case "supply": return <SupplyCabinet user={user} token={token} />;
+      case "manager": return <SalesManager user={user} token={token} />;
       default: return <ReadonlyCabinet user={user} token={token} />;
     }
   };
