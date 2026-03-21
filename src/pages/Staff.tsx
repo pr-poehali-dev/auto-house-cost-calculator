@@ -741,10 +741,12 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [rfqs, setRfqs] = useState<RFQRow[]>([]);
   const [selectedRfq, setSelectedRfq] = useState<(RFQRow & { proposals?: ProposalRow[] }) | null>(null);
   const [showRfqForm, setShowRfqForm] = useState(false);
-  const [rfqForm, setRfqForm] = useState({ title: "", construction_address: "", area: 100, floors: 2, house_type: "Кирпичный", deadline: "", customer_name: "", customer_phone: "", source_type: "manual" as "project"|"order"|"manual", source_project_id: null as number|null, items: [] as {name:string;unit:string;qty:number}[] });
+  const [rfqForm, setRfqForm] = useState({ title: "", construction_address: "", area: 100, floors: 2, house_type: "Кирпичный", deadline: "", customer_name: "", customer_phone: "", source_type: "manual" as "project"|"order"|"manual", source_project_id: null as number|null, order_id: null as number|null, items: [] as {name:string;unit:string;qty:number}[] });
   const [rfqSource, setRfqSource] = useState<"project"|"order"|"manual">("manual");
   const [publicProjects, setPublicProjects] = useState<{id:number;name:string;type:string;area:number;floors:number}[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  const [ordersList, setOrdersList] = useState<{id:number;number:string;client_name:string;address:string;status:string;stage:string}[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState("");
   // Suppliers
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
@@ -806,8 +808,19 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
     setLoadingProjects(false);
   }, []);
 
+  const loadOrdersList = useCallback(async () => {
+    setLoadingOrders(true);
+    const res = await supFetch(`${SUPPLIER_API}?action=orders_list`);
+    setOrdersList(res.orders || []);
+    setLoadingOrders(false);
+  }, [supFetch]);
+
   const applyProject = (p: {id:number;name:string;type:string;area:number;floors:number}) => {
     setRfqForm(prev => ({ ...prev, title: p.name, area: p.area, floors: p.floors, house_type: p.type, source_project_id: p.id, source_type: "project" }));
+  };
+
+  const applyOrder = (o: {id:number;number:string;client_name:string;address:string}) => {
+    setRfqForm(prev => ({ ...prev, order_id: o.id, construction_address: o.address, customer_name: o.client_name, source_type: "order", title: prev.title || `Заказ №${o.number}` }));
   };
 
   const createRfq = async () => {
@@ -1015,8 +1028,9 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
                         <button key={s.id} type="button"
                           onClick={() => {
                             setRfqSource(s.id);
-                            setRfqForm(p => ({ ...p, source_type: s.id }));
+                            setRfqForm(p => ({ ...p, source_type: s.id, order_id: null }));
                             if (s.id === "project" && publicProjects.length === 0) loadPublicProjects();
+                            if (s.id === "order" && ordersList.length === 0) loadOrdersList();
                           }}
                           className="flex flex-col items-center gap-1 py-3 px-2 rounded-xl text-center transition-all"
                           style={{
@@ -1064,28 +1078,42 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
                     </div>
                   )}
 
-                  {/* Данные заказчика для типа "order" */}
+                  {/* Выбор заказа клиента */}
                   {rfqSource === "order" && (
                     <div className="mb-5 rounded-xl p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                      <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>Данные заказчика</div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs mb-1.5 font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>ФИО / Компания</label>
-                          <input type="text" value={rfqForm.customer_name}
-                            onChange={e => setRfqForm(p => ({ ...p, customer_name: e.target.value }))}
-                            placeholder="Иванов Иван Иванович"
-                            className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                      <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>Выберите заказ</div>
+                      {loadingOrders ? (
+                        <div className="text-sm py-4 text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка заказов...</div>
+                      ) : ordersList.length === 0 ? (
+                        <div className="text-sm text-center py-4" style={{ color: "rgba(255,255,255,0.3)" }}>Нет заказов с адресом объекта</div>
+                      ) : (
+                        <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                          {ordersList.map(o => (
+                            <button key={o.id} type="button"
+                              onClick={() => applyOrder(o)}
+                              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all hover:scale-[1.01]"
+                              style={{
+                                background: rfqForm.order_id === o.id ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.04)",
+                                border: rfqForm.order_id === o.id ? "1px solid #FBBF24" : "1px solid rgba(255,255,255,0.07)",
+                              }}>
+                              <div>
+                                <div className="text-sm font-semibold text-white">№{o.number} — {o.client_name}</div>
+                                <div className="flex items-center gap-1.5 mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                                  <Icon name="MapPin" size={11} />
+                                  <span className="text-xs">{o.address}</span>
+                                </div>
+                              </div>
+                              {rfqForm.order_id === o.id && <Icon name="CheckCircle2" size={16} style={{ color: "#FBBF24", flexShrink: 0 }} />}
+                            </button>
+                          ))}
                         </div>
-                        <div>
-                          <label className="block text-xs mb-1.5 font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Телефон заказчика</label>
-                          <input type="text" value={rfqForm.customer_phone}
-                            onChange={e => setRfqForm(p => ({ ...p, customer_phone: e.target.value }))}
-                            placeholder="+7 900 000-00-00"
-                            className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                      )}
+                      {rfqForm.order_id && (
+                        <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                          <Icon name="MapPin" size={13} style={{ color: "#FBBF24" }} />
+                          <span className="text-xs text-white">Адрес подтянут из заказа и заблокирован для изменений</span>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -1095,15 +1123,21 @@ function SupplyCabinet({ user, token }: { user: StaffUser; token: string }) {
                       { label:"Название объекта", key:"title", placeholder:"Жилой дом, ул. Ленина 12" },
                       { label:"Адрес строительства", key:"construction_address", placeholder:"г. Москва, ул. Ленина, 12" },
                       { label:"Срок подачи КП", key:"deadline", type:"date" },
-                    ].map(f => (
+                    ].map(f => {
+                      const isAddressLocked = f.key === "construction_address" && !!rfqForm.order_id;
+                      return (
                       <div key={f.key}>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>
+                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>
+                          {f.label}{isAddressLocked && <span className="ml-1.5 normal-case tracking-normal font-normal" style={{ color: "#FBBF24" }}>из заказа</span>}
+                        </label>
                         <input type={f.type||"text"} value={(rfqForm as Record<string,unknown>)[f.key] as string} placeholder={f.placeholder}
-                          onChange={e => setRfqForm(p => ({...p,[f.key]:e.target.value}))}
+                          readOnly={isAddressLocked}
+                          onChange={e => !isAddressLocked && setRfqForm(p => ({...p,[f.key]:e.target.value}))}
                           className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
-                          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                          style={{ background: isAddressLocked ? "rgba(251,191,36,0.07)" : "rgba(255,255,255,0.06)", border: isAddressLocked ? "1px solid rgba(251,191,36,0.3)" : "1px solid rgba(255,255,255,0.1)", cursor: isAddressLocked ? "default" : "text" }} />
                       </div>
-                    ))}
+                      );
+                    })}
                     {[{label:"Площадь (м²)",key:"area"},{label:"Этажей",key:"floors"}].map(f => (
                       <div key={f.key}>
                         <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>{f.label}</label>

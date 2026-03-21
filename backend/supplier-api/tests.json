@@ -39,6 +39,12 @@
       "path": "/?action=admin_reset_password",
       "body": {"email": "test@test.com", "password": "test"},
       "expectedStatus": 403
+    },
+    {
+      "name": "Orders list no token",
+      "method": "GET",
+      "path": "/?action=orders_list",
+      "expectedStatus": 404
     }
   ]
 }

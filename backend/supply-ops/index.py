@@ -205,7 +205,7 @@ def handler(event, context):
         cur = conn.cursor()
         cur.execute(f"""
             SELECT p.rfq_id,p.supplier_id,p.items,p.total_amount,
-                   r.title,r.construction_address,
+                   r.title,r.construction_address,r.order_id,
                    s.company_name,s.contact_name,s.email,s.phone
             FROM {S}.proposals p
             JOIN {S}.rfq r ON r.id=p.rfq_id
@@ -215,7 +215,14 @@ def handler(event, context):
         row = cur.fetchone()
         if not row: cur.close(); conn.close(); return resp({"error":"Предложение не найдено"}, 404)
 
-        rfq_id,sup_id,items,total,rfq_title,address,comp,contact,email,phone = row
+        rfq_id,sup_id,items,total,rfq_title,rfq_address,order_id,comp,contact,email,phone = row
+        # Если RFQ привязан к заказу — берём адрес из заказа (единый источник правды)
+        address = rfq_address
+        if order_id:
+            cur.execute(f"SELECT address FROM {S}.orders WHERE id=%s AND address IS NOT NULL AND address != ''", (order_id,))
+            order_row = cur.fetchone()
+            if order_row and order_row[0]:
+                address = order_row[0]
         inv_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{proposal_id}"
 
         cur.execute(f"SELECT id FROM {S}.invoices WHERE invoice_number=%s", (inv_number,))
