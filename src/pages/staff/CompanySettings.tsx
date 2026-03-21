@@ -27,6 +27,7 @@ interface CompanySettingsData {
   logo_url?: string;
   stamp_url?: string;
   signature_url?: string;
+  company_map_url?: string;
 }
 
 interface ContractTemplate {
@@ -184,6 +185,89 @@ function UploadZone({
   );
 }
 
+// ─── Upload Zone Map (wide image) ─────────────────────────────────────────────
+function UploadZoneMap({
+  currentUrl,
+  token,
+  onUploaded,
+}: {
+  currentUrl?: string;
+  token: string;
+  onUploaded: (url: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState(currentUrl || "");
+  const [error, setError] = useState("");
+
+  useEffect(() => { setPreview(currentUrl || ""); }, [currentUrl]);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    setError("");
+    try {
+      const res = await apiFetch(
+        `${COMPANY_URL}?action=upload_map`,
+        { method: "POST", body: JSON.stringify({ file_name: file.name }) },
+        token
+      );
+      if (res.error) { setError(res.error); setUploading(false); return; }
+      await fetch(res.presigned_url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+      setPreview(res.cdn_url);
+      onUploaded(res.cdn_url);
+    } catch {
+      setError("Ошибка загрузки");
+    }
+    setUploading(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div
+        className="rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all hover:border-yellow-400/40 relative overflow-hidden"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "2px dashed rgba(255,255,255,0.12)",
+          minHeight: 160,
+        }}
+        onClick={() => inputRef.current?.click()}
+      >
+        {preview ? (
+          <img src={preview} alt="Карта предприятия" className="w-full h-full object-cover" style={{ maxHeight: 160 }} />
+        ) : (
+          <div className="flex flex-col items-center gap-2 py-8">
+            <Icon name="Map" size={32} style={{ color: "rgba(255,255,255,0.2)" }} />
+            <span className="text-xs text-center px-4" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Нажмите чтобы загрузить карту / схему проезда
+            </span>
+          </div>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(17,21,32,0.85)" }}>
+            <Icon name="Loader2" size={24} className="animate-spin" style={{ color: "#FBBF24" }} />
+          </div>
+        )}
+      </div>
+      {preview && (
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="text-xs py-1.5 rounded-lg transition-all hover:opacity-80"
+          style={{ color: "#FBBF24", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}
+        >
+          Заменить карту
+        </button>
+      )}
+      {error && <p className="text-xs" style={{ color: "#ef4444" }}>{error}</p>}
+      <input ref={inputRef} type="file" className="hidden" accept="image/*"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function CompanySettings({ token }: CompanySettingsProps) {
   const [tab, setTab] = useState<"details" | "images" | "templates">("details");
@@ -204,6 +288,11 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
   const tplFileRef = useRef<HTMLInputElement>(null);
   const [tplUploading, setTplUploading] = useState(false);
   const [tplUploadError, setTplUploadError] = useState("");
+
+  // parse contract
+  const contractFileRef = useRef<HTMLInputElement>(null);
+  const [contractParsing, setContractParsing] = useState(false);
+  const [contractParseMsg, setContractParseMsg] = useState("");
 
   // load settings
   useEffect(() => {
@@ -239,6 +328,35 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
     setSaving(false);
     setSaveMsg(res.error ? `Ошибка: ${res.error}` : "Сохранено успешно");
     setTimeout(() => setSaveMsg(""), 3000);
+  };
+
+  const parseContractFile = async (file: File) => {
+    setContractParsing(true);
+    setContractParseMsg("Читаю договор...");
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      const res = await apiFetch(
+        `${COMPANY_URL}?action=parse_contract`,
+        { method: "POST", body: JSON.stringify({ file_name: file.name, file_base64: base64 }) },
+        token
+      );
+      if (res.error) {
+        setContractParseMsg(`Ошибка: ${res.error}`);
+      } else if (res.requisites) {
+        setForm((p) => ({ ...p, ...res.requisites }));
+        setContractParseMsg(`Найдено и заполнено ${res.fields_found} полей`);
+        setTimeout(() => setContractParseMsg(""), 4000);
+      } else {
+        setContractParseMsg("Реквизиты не найдены в документе");
+      }
+    } catch {
+      setContractParseMsg("Ошибка при чтении файла");
+    }
+    setContractParsing(false);
   };
 
   const deleteTemplate = async (id: number) => {
@@ -341,6 +459,46 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
               </div>
             </div>
           )}
+
+          {/* Кнопка загрузки из договора */}
+          <div className="flex items-center justify-between pb-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            <div>
+              <p className="text-sm font-semibold text-white">Реквизиты организации</p>
+              <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
+                Заполните вручную или загрузите договор — поля заполнятся автоматически
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {contractParseMsg && (
+                <span className="text-xs px-3 py-1.5 rounded-lg" style={{
+                  color: contractParseMsg.startsWith("Ошибка") || contractParseMsg === "Реквизиты не найдены в документе" ? "#ef4444" : "#00FF88",
+                  background: contractParseMsg.startsWith("Ошибка") || contractParseMsg === "Реквизиты не найдены в документе"
+                    ? "rgba(239,68,68,0.1)" : "rgba(0,255,136,0.1)",
+                }}>
+                  {contractParseMsg}
+                </span>
+              )}
+              <button
+                onClick={() => contractFileRef.current?.click()}
+                disabled={contractParsing}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.25)", color: "#00D4FF" }}
+              >
+                {contractParsing
+                  ? <><Icon name="Loader2" size={14} className="animate-spin" /> Читаю договор...</>
+                  : <><Icon name="FileUp" size={14} /> Заполнить из договора</>
+                }
+              </button>
+              <input
+                ref={contractFileRef}
+                type="file"
+                className="hidden"
+                accept=".docx,.doc,.pdf,.txt"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) parseContractFile(f); e.target.value = ""; }}
+              />
+            </div>
+          </div>
+
           {/* Наименование */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={LABEL_STYLE}>
@@ -625,6 +783,26 @@ export default function CompanySettings({ token }: CompanySettingsProps) {
               onUploaded={(url) => setForm((p) => ({ ...p, signature_url: url }))}
             />
           </div>
+
+          {/* Карта предприятия */}
+          <div className="mt-6 pt-6" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={LABEL_STYLE}>
+              Карта предприятия / схема проезда
+            </p>
+            <div className="grid grid-cols-2 gap-6">
+              <UploadZoneMap
+                currentUrl={form.company_map_url}
+                token={token}
+                onUploaded={(url) => setForm((p) => ({ ...p, company_map_url: url }))}
+              />
+              <div className="flex flex-col justify-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                <p className="leading-relaxed">Загрузите скриншот карты или схему проезда к вашему офису/объекту.</p>
+                <p className="leading-relaxed">Используется в коммерческих предложениях и презентационных материалах.</p>
+                <p className="leading-relaxed">Рекомендуемый формат: PNG или JPG, горизонтальная ориентация.</p>
+              </div>
+            </div>
+          </div>
+
           <div
             className="mt-6 rounded-xl p-4 flex gap-3"
             style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)" }}

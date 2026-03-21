@@ -114,7 +114,7 @@ def handler(event: dict, context) -> dict:
                 "actual_address", "phone", "email", "website",
                 "bank_name", "bik", "account_number", "corr_account",
                 "director_name", "director_position",
-                "logo_url", "stamp_url", "signature_url",
+                "logo_url", "stamp_url", "signature_url", "company_map_url",
             ]
             sets = []
             for field in allowed:
@@ -140,7 +140,7 @@ def handler(event: dict, context) -> dict:
         # ------------------------------------------------------------------ #
         # POST upload_logo / upload_stamp / upload_signature                  #
         # ------------------------------------------------------------------ #
-        if method == "POST" and action in ("upload_logo", "upload_stamp", "upload_signature"):
+        if method == "POST" and action in ("upload_logo", "upload_stamp", "upload_signature", "upload_map"):
             file_name = body.get("file_name", "")
             if not file_name:
                 return resp({"error": "file_name обязателен"}, 400)
@@ -149,6 +149,7 @@ def handler(event: dict, context) -> dict:
                 "upload_logo": "logo_url",
                 "upload_stamp": "stamp_url",
                 "upload_signature": "signature_url",
+                "upload_map": "company_map_url",
             }
             db_field = field_map[action]
 
@@ -236,6 +237,73 @@ def handler(event: dict, context) -> dict:
             )
             url = cdn_url(key)
             return resp({"ok": True, "cdn_url": url, "file_name": file_name})
+
+        # ------------------------------------------------------------------ #
+        # POST parse_contract — извлечь реквизиты из docx/pdf/txt           #
+        # ------------------------------------------------------------------ #
+        if method == "POST" and action == "parse_contract":
+            import base64, io, zipfile, re as _re
+
+            file_name = body.get("file_name", "")
+            file_b64 = body.get("file_base64", "")
+            if not file_b64:
+                return resp({"error": "file_base64 обязателен"}, 400)
+
+            file_bytes = base64.b64decode(file_b64)
+            text = ""
+
+            ext = file_name.lower().split(".")[-1] if "." in file_name else ""
+
+            if ext in ("docx", "doc"):
+                # Читаем docx как zip -> word/document.xml
+                try:
+                    zf = zipfile.ZipFile(io.BytesIO(file_bytes))
+                    xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
+                    text = _re.sub(r"<[^>]+>", " ", xml)
+                    text = _re.sub(r"\s+", " ", text)
+                except Exception:
+                    text = file_bytes.decode("utf-8", errors="ignore")
+            else:
+                # pdf или txt — берём raw text (pdf без библиотек даст мусор, но попробуем)
+                text = file_bytes.decode("utf-8", errors="ignore")
+
+            def find(patterns, txt):
+                for p in patterns:
+                    m = _re.search(p, txt, _re.IGNORECASE)
+                    if m:
+                        return m.group(1).strip()
+                return ""
+
+            requisites = {
+                "inn":            find([r"ИНН[:\s]+(\d{10,12})", r"ИНН/КПП[:\s]+(\d{10})"], text),
+                "kpp":            find([r"КПП[:\s]+(\d{9})", r"ИНН/КПП\s*\d+/(\d{9})"], text),
+                "ogrn":           find([r"ОГРН[:\s]+(\d{13,15})"], text),
+                "bank_name":      find([r"Банк[:\s]+([^\n,;]{4,60})", r"в банке[:\s]+([^\n,;]{4,60})"], text),
+                "bik":            find([r"БИК[:\s]+(\d{9})"], text),
+                "account_number": find([r"р/с[:\s]+([\d]{20})", r"р\.с\.[:\s]+([\d]{20})", r"расчётный счёт[:\s]+([\d]{20})"], text),
+                "corr_account":   find([r"к/с[:\s]+([\d]{20})", r"корр\. счёт[:\s]+([\d]{20})"], text),
+                "legal_address":  find([r"Юридический адрес[:\s]+([^\n]{10,120})", r"Адрес[:\s]+([^\n]{10,120})"], text),
+                "phone":          find([r"Тел[.:]\s*([\+\d\s\(\)\-]{7,20})", r"Телефон[:\s]+([\+\d\s\(\)\-]{7,20})"], text),
+                "email":          find([r"[Ee]-?mail[:\s]+([\w.\-]+@[\w.\-]+\.\w+)", r"([\w.\-]+@[\w.\-]+\.\w+)"], text),
+                "director_name":  find([r"(?:Генеральный директор|Директор|Руководитель)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][\.А-ЯЁа-яё\s]{2,40})"], text),
+                "company_name":   find([r'ООО\s+"([^"]{2,60})"', r"ООО\s+«([^»]{2,60})»", r'АО\s+"([^"]{2,60})"', r"ИП\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][\.А-ЯЁ\s]{2,40})"], text),
+            }
+
+            # убираем пустые
+            filled = {k: v for k, v in requisites.items() if v}
+            return resp({"requisites": filled, "fields_found": len(filled)})
+
+        # ------------------------------------------------------------------ #
+        # GET list_s3 — список файлов в S3 (для отладки)                    #
+        # ------------------------------------------------------------------ #
+        if method == "GET" and action == "list_s3":
+            prefix = qs.get("prefix", "company/")
+            result = s3().list_objects_v2(Bucket="bucket", Prefix=prefix, MaxKeys=50)
+            files = [
+                {"key": o["Key"], "size": o["Size"], "url": cdn_url(o["Key"])}
+                for o in result.get("Contents", [])
+            ]
+            return resp({"files": files, "count": len(files)})
 
         # ------------------------------------------------------------------ #
         # DELETE delete_template                                              #
