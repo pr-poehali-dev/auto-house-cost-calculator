@@ -284,13 +284,6 @@ export default function ProjectDetail() {
                   <Icon name="Phone" size={16} />
                   Оставить заявку на строительство
                 </button>
-                <button
-                  onClick={() => navigate(`/supplier?project=${project.id}&area=${project.area}&floors=${project.floors}`)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
-                  style={{ background: "rgba(168,85,247,0.12)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)" }}>
-                  <Icon name="Truck" size={15} />
-                  Запросить КП у поставщиков
-                </button>
               </div>
             </div>
           </div>

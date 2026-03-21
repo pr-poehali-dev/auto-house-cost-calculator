@@ -94,13 +94,7 @@ export default function ProjectCard({ project: p, index: i, selectedProject, set
               Подробнее
             </button>
           </div>
-          <button
-            onClick={e => { e.stopPropagation(); navigate(`/supplier?rfq=1&project=${encodeURIComponent(p.name)}&area=${p.area}&floors=${p.floors}`); }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02]"
-            style={{ background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(168,85,247,0.1))", color: "#A855F7", border: "1px solid rgba(168,85,247,0.35)", boxShadow: "0 0 15px rgba(168,85,247,0.1)" }}>
-            <Icon name="Truck" size={13} />
-            Запросить КП у поставщиков
-          </button>
+
         </div>
 
         {selectedProject === p.id && (
