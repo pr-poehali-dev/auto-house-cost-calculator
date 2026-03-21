@@ -168,6 +168,23 @@ def classify_document(text: str) -> dict:
     return {"category": "other", "summary": ""}
 
 def extract_text_from_pdf(file_data: bytes) -> str:
+    """Извлекает текст из PDF — pdfminer.six (основной), regex (fallback)"""
+    # Метод 1: pdfminer.six — работает с большинством текстовых PDF
+    try:
+        from pdfminer.high_level import extract_text as pdfminer_extract
+        from pdfminer.layout import LAParams
+        import io
+        laparams = LAParams(line_margin=0.5, word_margin=0.1)
+        text = pdfminer_extract(io.BytesIO(file_data), laparams=laparams)
+        if text and len(text.strip()) > 50:
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            result = "\n".join(lines)
+            print(f"[spec-ai] pdfminer extracted {len(result)} chars")
+            return result
+    except Exception as e:
+        print(f"[spec-ai] pdfminer error: {e}")
+
+    # Метод 2: regex fallback
     try:
         text = file_data.decode("latin-1", errors="ignore")
         chunks = re.findall(r'\(([^)]{1,200})\)', text)
@@ -176,7 +193,9 @@ def extract_text_from_pdf(file_data: bytes) -> str:
             cleaned = chunk.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ").strip()
             if len(cleaned) > 2 and any(c.isalpha() for c in cleaned):
                 readable.append(cleaned)
-        return " | ".join(readable[:1200])
+        result = " | ".join(readable[:1200])
+        print(f"[spec-ai] regex fallback extracted {len(result)} chars")
+        return result
     except:
         return ""
 
@@ -321,7 +340,9 @@ def handler(event: dict, context) -> dict:
         url = cdn_url(final_key)
 
         # Извлекаем текст и сразу классифицируем
+        print(f"[spec-ai] uploaded file={file_name} size={len(file_bytes)} key={final_key}")
         extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name)
+        print(f"[spec-ai] extracted text={len(extracted_text)} images={len(images_b64)}")
         pages = split_text_into_pages(extracted_text) if extracted_text else []
 
         doc_info = {"category": "other", "summary": ""}
