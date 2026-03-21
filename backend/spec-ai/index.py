@@ -2,7 +2,7 @@
 AI-разбор загруженных спецификаций (PDF/Excel) и заполнение ведомости объёмов работ.
 Использует OpenAI GPT-4o для извлечения позиций из текста файла.
 """
-import json, os, base64, re
+import json, os, base64, re, uuid, ssl
 import psycopg2
 import boto3
 import urllib.request
@@ -54,16 +54,45 @@ SPEC_PROMPT = """Ты — ассистент строительной компа
 Верни ТОЛЬКО валидный JSON-массив без пояснений:
 [{"section":"...","name":"...","unit":"...","qty":0,"price_per_unit":0,"note":"..."}]"""
 
-def _openai_request(payload: dict, api_key: str) -> dict:
-    data = json.dumps(payload, ensure_ascii=False).encode()
+def gigachat_token() -> str:
+    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
+    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
     req = urllib.request.Request(
-        "https://api.deepseek.com/v1/chat/completions",
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
         data=data,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {auth_key}",
+            "RqUID": str(uuid.uuid4()),
+        },
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        return json.loads(r.read())["access_token"]
+
+def gigachat_chat(messages: list, temperature: float = 0.1, max_tokens: int = 4000) -> str:
+    token = gigachat_token()
+    data = json.dumps({
+        "model": "GigaChat",
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=120, context=ctx) as r:
+        result = json.loads(r.read())
+    return result["choices"][0]["message"]["content"].strip()
 
 def _parse_items(content: str) -> list:
     match = re.search(r'\[.*\]', content, re.DOTALL)
@@ -75,18 +104,12 @@ def _parse_items(content: str) -> list:
     return []
 
 def call_openai_text(text: str, materials_context: str) -> list:
-    """Разбор текстовой спецификации через DeepSeek"""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
+    """Разбор текстовой спецификации через GigaChat"""
+    if not os.environ.get("GIGACHAT_AUTH_KEY"):
         return []
     prompt = f"{SPEC_PROMPT}\n\nБаза материалов для сопоставления цен:\n{materials_context}\n\nТекст спецификации:\n{text[:12000]}"
-    result = _openai_request({
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 4000,
-    }, api_key)
-    return _parse_items(result["choices"][0]["message"]["content"].strip())
+    content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4000)
+    return _parse_items(content)
 
 def ocr_images_to_text(images_b64: list) -> str:
     """OCR через OCR.space — распознаёт текст из base64 JPEG изображений"""
@@ -119,7 +142,7 @@ def ocr_images_to_text(images_b64: list) -> str:
     return "\n".join(texts)
 
 def call_openai_vision(images_b64: list, materials_context: str) -> list:
-    """OCR сканированного PDF: сначала OCR.space → потом DeepSeek анализирует текст"""
+    """OCR сканированного PDF: сначала OCR.space → потом GigaChat анализирует текст"""
     ocr_text = ocr_images_to_text(images_b64)
     print(f"[spec-ai] OCR extracted {len(ocr_text)} chars")
     if not ocr_text.strip():

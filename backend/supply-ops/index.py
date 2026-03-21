@@ -1,7 +1,7 @@
 """
 supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент
 """
-import json, os, io, base64, urllib.request, urllib.error
+import json, os, io, base64, uuid, ssl, urllib.request, urllib.parse, urllib.error
 import psycopg2
 from datetime import datetime
 
@@ -82,32 +82,49 @@ SYSTEM_PROMPTS = {
 - Отвечаешь на вопросы о работе портала""",
 }
 
-def get_openai_response(messages: list, role: str) -> str:
-    api_key = os.environ.get("DEEPSEEK_API_KEY","")
-    if not api_key:
-        return "AI-ассистент временно недоступен. Пожалуйста, добавьте DEEPSEEK_API_KEY в настройках."
-    system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": 1024,
-        "temperature": 0.7,
-    }
+def gigachat_token() -> str:
+    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
+    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
     req = urllib.request.Request(
-        "https://api.deepseek.com/v1/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {auth_key}",
+            "RqUID": str(uuid.uuid4()),
+        },
         method="POST"
     )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        return json.loads(r.read())["access_token"]
+
+def get_openai_response(messages: list, role: str) -> str:
+    if not os.environ.get("GIGACHAT_AUTH_KEY"):
+        return "AI-ассистент временно недоступен."
+    system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        token = gigachat_token()
+        payload = {
+            "model": "GigaChat",
+            "messages": [{"role": "system", "content": system_prompt}] + messages,
+            "max_tokens": 1024,
+            "temperature": 0.7,
+        }
+        req = urllib.request.Request(
+            "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST"
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
             result = json.loads(r.read().decode())
         return result["choices"][0]["message"]["content"]
-    except urllib.error.HTTPError as e:
-        err = e.read().decode()
-        if "insufficient_quota" in err:
-            return "Баланс DeepSeek исчерпан. Пополните счёт на platform.deepseek.com"
-        return f"Ошибка DeepSeek: {e.code}"
     except Exception as e:
         return f"Ошибка соединения с AI: {str(e)}"
 

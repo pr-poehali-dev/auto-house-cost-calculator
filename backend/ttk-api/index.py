@@ -1,9 +1,9 @@
 """
 ttk-api: справочник технологических карт (ТТК).
-Загрузка PDF (текст или скан), OCR через OCR.space, AI-разбор через DeepSeek.
+Загрузка PDF (текст или скан), OCR через OCR.space, AI-разбор через GigaChat.
 Хранение структурированных данных: материалы, ресурсы, условия хранения/приёмки.
 """
-import json, os, base64, re, urllib.request, urllib.parse, urllib.error
+import json, os, base64, re, uuid, ssl, urllib.request, urllib.parse, urllib.error
 import psycopg2
 import boto3
 
@@ -132,27 +132,52 @@ def extract_images_from_pdf(file_data: bytes) -> list:
     except:
         return []
 
-def ai_parse_ttk(text: str) -> dict:
-    """DeepSeek анализирует текст ТТК и возвращает структурированные данные"""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key or not text.strip():
-        return {}
-    prompt = f"{TTK_PROMPT}\n\nТекст технологической карты:\n{text[:15000]}"
-    data = json.dumps({
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 4000,
-    }, ensure_ascii=False).encode()
+def gigachat_token() -> str:
+    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
+    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
     req = urllib.request.Request(
-        "https://api.deepseek.com/v1/chat/completions",
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
         data=data,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {auth_key}",
+            "RqUID": str(uuid.uuid4()),
+        },
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        return json.loads(r.read())["access_token"]
+
+def gigachat_chat(messages: list, temperature: float = 0.1, max_tokens: int = 4000) -> str:
+    token = gigachat_token()
+    data = json.dumps({
+        "model": "GigaChat",
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=120, context=ctx) as r:
         result = json.loads(r.read())
-    content = result["choices"][0]["message"]["content"].strip()
+    return result["choices"][0]["message"]["content"].strip()
+
+def ai_parse_ttk(text: str) -> dict:
+    """GigaChat анализирует текст ТТК и возвращает структурированные данные"""
+    if not os.environ.get("GIGACHAT_AUTH_KEY") or not text.strip():
+        return {}
+    prompt = f"{TTK_PROMPT}\n\nТекст технологической карты:\n{text[:15000]}"
+    content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4000)
     match = re.search(r'\{.*\}', content, re.DOTALL)
     if match:
         try:

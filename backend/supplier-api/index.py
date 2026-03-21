@@ -3,7 +3,7 @@ supplier-api: регистрация/авторизация поставщико
 Роутинг через querystring: ?action=register|login|me|profile_update|rfq_list|rfq_get|rfq_create|rfq_award|rfq_close|notify
 |upload_kp_file|price_list_save|price_list_get|materials_search
 """
-import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse, base64, io, re
+import json, os, hashlib, secrets, smtplib, urllib.request, urllib.parse, base64, io, re, uuid, ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone, date
@@ -30,10 +30,49 @@ CATS_HINTS = """Подсказки по категориям:
 - Отделочные материалы: краска, грунтовка, грунт-эмаль, шпаклёвка, штукатурка, плитка, ламинат, линолеум, обои, наливной пол, клей строительный, эпоксидная грунтовка, разбавитель, отвердитель, отбеливатель для дерева, огнебиозащитный состав, очиститель пены, ремонтно-отделочные работы
 - Стройматериалы: кирпич, блок газобетонный, блок керамический, пеноблок, шлакоблок, песок, щебень, гравий, бетон, цемент, плита перекрытия, кольцо стеновое, ГКЛ, гипсокартон, брусчатка"""
 
+def gigachat_token() -> str:
+    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
+    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
+    req = urllib.request.Request(
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {auth_key}",
+            "RqUID": str(uuid.uuid4()),
+        },
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        return json.loads(r.read())["access_token"]
+
+def gigachat_chat(messages: list, temperature: float = 0.1, max_tokens: int = 2000) -> str:
+    token = gigachat_token()
+    data = json.dumps({
+        "model": "GigaChat",
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+        result = json.loads(r.read())
+    return result["choices"][0]["message"]["content"].strip()
+
 def ai_classify_materials(items: list) -> list:
-    """DeepSeek: определяет категорию и нормализует единицу измерения для каждой позиции"""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key or not items:
+    """GigaChat: определяет категорию и нормализует единицу измерения для каждой позиции"""
+    if not os.environ.get("GIGACHAT_AUTH_KEY") or not items:
         return items
     names = "\n".join(f"{i+1}. {it.get('name','')}" for i, it in enumerate(items))
     cats_str = ", ".join(CATS)
@@ -53,12 +92,7 @@ def ai_classify_materials(items: list) -> list:
 Верни ТОЛЬКО JSON-массив (без пояснений), по одному объекту на каждую позицию:
 [{{"idx":1,"category":"...","unit":"...","name_clean":"..."}}]"""
     try:
-        data = json.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],"temperature":0.1,"max_tokens":2000}, ensure_ascii=False).encode()
-        req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=data,
-            headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"}, method="POST")
-        with urllib.request.urlopen(req, timeout=30) as r:
-            result = json.loads(r.read())
-        content = result["choices"][0]["message"]["content"].strip()
+        content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
             ai_rows = json.loads(match.group())
