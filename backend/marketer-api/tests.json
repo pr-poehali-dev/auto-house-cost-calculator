@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "No token returns 401",
+      "method": "GET",
+      "path": "/?action=competitor_list",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Analyze URL no token",
+      "method": "POST",
+      "path": "/?action=analyze_url",
+      "body": {"url": "https://example.com"},
+      "expectedStatus": 401
+    }
+  ]
+}
