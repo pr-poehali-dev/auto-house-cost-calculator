@@ -524,7 +524,14 @@ function OrderDetail({
     });
   }, [orderId, token]);
 
-  useEffect(() => { loadOrder(); }, [loadOrder]);
+  const loadRfqs = useCallback(() => {
+    apiFetch(`${SUPPLIER_API}?action=rfq_list`, {}, token).then((r) => {
+      const all: RfqBrief[] = r.rfqs || [];
+      setRfqs(all.filter((rfq) => (rfq as unknown as { order_id?: number }).order_id === orderId));
+    });
+  }, [orderId, token]);
+
+  useEffect(() => { loadOrder(); loadRfqs(); }, [loadOrder, loadRfqs]);
 
   useEffect(() => {
     if (tab === "proposal") {
@@ -540,13 +547,8 @@ function OrderDetail({
         setTemplates(r.templates || [])
       );
     }
-    if (tab === "supply") {
-      apiFetch(`${SUPPLIER_API}?action=rfq_list`, {}, token).then((r) => {
-        const all: RfqBrief[] = r.rfqs || [];
-        setRfqs(all.filter((rfq) => (rfq as unknown as { order_id?: number }).order_id === orderId));
-      });
-    }
-  }, [tab, orderId, token]);
+    if (tab === "supply") loadRfqs();
+  }, [tab, orderId, token, loadRfqs]);
 
   if (loading) {
     return (
@@ -634,6 +636,14 @@ function OrderDetail({
           >
             <Icon name={t.icon} size={13} />
             {t.label}
+            {t.id === "supply" && rfqs.length > 0 && (
+              <span
+                className="ml-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold"
+                style={{ background: tab === t.id ? "#FBBF24" : "rgba(251,191,36,0.25)", color: tab === t.id ? "#0a0d14" : "#FBBF24" }}
+              >
+                {rfqs.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
