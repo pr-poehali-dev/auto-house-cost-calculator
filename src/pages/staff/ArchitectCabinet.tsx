@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
 import NormDocuments from "@/components/project-editor/NormDocuments";
 import GeometryCalc from "@/components/project-editor/GeometryCalc";
+import BimImporter from "@/components/project-editor/BimImporter";
 import TzAnalyzer from "@/pages/staff/TzAnalyzer";
 import type { AiItem } from "@/pages/staff/materials-types";
 
@@ -1185,7 +1186,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech" | "norms" | "calc">("ai");
+  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech" | "norms" | "calc" | "bim">("ai");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -1304,13 +1305,14 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
 
   const TABS = [
     { id: "ai",   label: "AI-ассистент",  icon: "Sparkles" },
-    { id: "calc", label: "Расчёт объёмов", icon: "Calculator" },
-    { id: "info", label: "Информация",     icon: "Info" },
-    { id: "files",label: "Графика",        icon: "Image",          count: proj.files?.length },
-    { id: "docs", label: "Документация",   icon: "FolderOpen",     highlight: pendingDocItems ? pendingDocItems.length : 0 },
-    { id: "spec", label: "Ведомость ОР",   icon: "FileSpreadsheet" },
-    { id: "tech", label: "Тех. карты",     icon: "BookOpen" },
-    { id: "norms",label: "Нормативы",      icon: "BookMarked" },
+    { id: "calc", label: "Расчёт",        icon: "Calculator" },
+    { id: "bim",  label: "Импорт BIM",    icon: "Box" },
+    { id: "info", label: "Информация",    icon: "Info" },
+    { id: "files",label: "Графика",       icon: "Image",          count: proj.files?.length },
+    { id: "docs", label: "Документация",  icon: "FolderOpen",     highlight: pendingDocItems ? pendingDocItems.length : 0 },
+    { id: "spec", label: "ВОР",           icon: "FileSpreadsheet" },
+    { id: "tech", label: "Тех. карты",    icon: "BookOpen" },
+    { id: "norms",label: "Нормативы",     icon: "BookMarked" },
   ] as const;
 
   const filesByType = FILE_TYPES.map(ft => ({
@@ -1673,6 +1675,19 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
       {/* ── Нормативные документы ── */}
       {tab === "norms" && (
         <NormDocuments token={token} />
+      )}
+
+      {/* ── Импорт BIM / IFC / Excel / PDF / DWG ── */}
+      {tab === "bim" && (
+        <BimImporter
+          token={token}
+          onImport={(items) => {
+            setTab("spec");
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("bom-ready", { detail: { items, projectId: proj.id } }));
+            }, 100);
+          }}
+        />
       )}
 
       {/* ── Геометрический расчёт ── */}

@@ -1,0 +1,18 @@
+{
+  "tests": [
+    {
+      "name": "No token returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 401
+    },
+    {
+      "name": "No file returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"file_b64": "", "filename": "test.ifc"},
+      "expectedStatus": 401
+    }
+  ]
+}
