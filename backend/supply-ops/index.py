@@ -1,11 +1,14 @@
 """
 supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент
 """
-import json, os, io, base64, uuid, ssl, re, urllib.request, urllib.parse, urllib.error
+import json, os, io, base64, uuid, ssl, re, urllib.request, urllib.parse, urllib.error, time
 import psycopg2
 from datetime import datetime
 
 S = "t_p78845984_auto_house_cost_calc"
+
+# Кэш токена GigaChat — живёт 25 минут (токен действует 30 мин)
+_gc_token_cache = {"token": "", "expires_at": 0.0}
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -83,6 +86,10 @@ SYSTEM_PROMPTS = {
 }
 
 def gigachat_token() -> str:
+    global _gc_token_cache
+    now = time.time()
+    if _gc_token_cache["token"] and _gc_token_cache["expires_at"] > now:
+        return _gc_token_cache["token"]
     auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
     data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
     req = urllib.request.Request(
@@ -98,8 +105,11 @@ def gigachat_token() -> str:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
-        return json.loads(r.read())["access_token"]
+    with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+        token = json.loads(r.read())["access_token"]
+    _gc_token_cache["token"] = token
+    _gc_token_cache["expires_at"] = now + 1500  # 25 минут
+    return token
 
 def gigachat_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
     token = gigachat_token()

@@ -45,7 +45,17 @@ def project_row(r):
             "tag":r[7],"tag_color":r[8],"description":r[9],"features":r[10],
             "is_active":r[11],"created_by":r[12],"updated_by":r[13],
             "created_at":str(r[14]),"updated_at":str(r[15]),
-            "roof_type":r[16] or "","foundation_type":r[17] or "","wall_type":r[18] or ""}
+            "roof_type":r[16] or "","foundation_type":r[17] or "","wall_type":r[18] or "",
+            "foundation_material":r[19] or "","foundation_depth":r[20] or "",
+            "ext_wall_material":r[21] or "","ext_wall_thickness":r[22] or "",
+            "int_bearing_material":r[23] or "","int_bearing_thickness":r[24] or "",
+            "partition_material":r[25] or "","partition_thickness":r[26] or "",
+            "floor_slab_material":r[27] or "","floor_slab_thickness":r[28] or "","floor_slab_area":r[29] or "",
+            "attic_slab_material":r[30] or "","attic_slab_thickness":r[31] or "",
+            "window_material":r[32] or "","window_profile":r[33] or "","window_color":r[34] or "","window_area":r[35] or "",
+            "door_info":r[36] or "","staircase_info":r[37] or "",
+            "roof_material":r[38] or "","roof_area":r[39] or "","roof_style":r[40] or "",
+            "heating_type":r[41] or "","water_supply":r[42] or "","sewage":r[43] or "","electrical":r[44] or ""}
 
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
@@ -58,7 +68,7 @@ def handler(event: dict, context) -> dict:
     body = {}
     if event.get("body"):
         try: body = json.loads(event["body"])
-        except: pass
+        except ValueError: pass
 
     conn = db()
 
@@ -70,7 +80,12 @@ def handler(event: dict, context) -> dict:
         cur.execute(f"""
             SELECT p.id,p.name,p.type,p.area,p.floors,p.rooms,p.price,p.tag,p.tag_color,
                    p.description,p.features,p.is_active,p.created_by,p.updated_by,p.created_at,p.updated_at,
-                   p.roof_type,p.foundation_type,p.wall_type
+                   p.roof_type,p.foundation_type,p.wall_type,
+                   p.foundation_material,p.foundation_depth,p.ext_wall_material,p.ext_wall_thickness,
+                   p.int_bearing_material,p.int_bearing_thickness,p.partition_material,p.partition_thickness,
+                   p.floor_slab_material,p.floor_slab_thickness,p.floor_slab_area,p.attic_slab_material,p.attic_slab_thickness,
+                   p.window_material,p.window_profile,p.window_color,p.window_area,p.door_info,p.staircase_info,
+                   p.roof_material,p.roof_area,p.roof_style,p.heating_type,p.water_supply,p.sewage,p.electrical
             FROM {S}.house_projects p WHERE p.is_active=TRUE ORDER BY p.created_at DESC
         """)
         projects = [project_row(r) for r in cur.fetchall()]
@@ -239,7 +254,7 @@ def handler(event: dict, context) -> dict:
 
     if action == "list":
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type FROM {S}.house_projects ORDER BY created_at DESC")
+        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type,foundation_material,foundation_depth,ext_wall_material,ext_wall_thickness,int_bearing_material,int_bearing_thickness,partition_material,partition_thickness,floor_slab_material,floor_slab_thickness,floor_slab_area,attic_slab_material,attic_slab_thickness,window_material,window_profile,window_color,window_area,door_info,staircase_info,roof_material,roof_area,roof_style,heating_type,water_supply,sewage,electrical FROM {S}.house_projects ORDER BY created_at DESC")
         projects = [project_row(r) for r in cur.fetchall()]
         for p in projects:
             cur.execute(f"SELECT id,file_type,file_url,file_name,sort_order FROM {S}.project_files WHERE project_id=%s ORDER BY file_type,sort_order", (p["id"],))
@@ -251,7 +266,7 @@ def handler(event: dict, context) -> dict:
         pid = body.get("project_id") or qs.get("project_id")
         if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type FROM {S}.house_projects WHERE id=%s", (pid,))
+        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type,foundation_material,foundation_depth,ext_wall_material,ext_wall_thickness,int_bearing_material,int_bearing_thickness,partition_material,partition_thickness,floor_slab_material,floor_slab_thickness,floor_slab_area,attic_slab_material,attic_slab_thickness,window_material,window_profile,window_color,window_area,door_info,staircase_info,roof_material,roof_area,roof_style,heating_type,water_supply,sewage,electrical FROM {S}.house_projects WHERE id=%s", (pid,))
         r = cur.fetchone()
         if not r: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
         p = project_row(r)
@@ -269,11 +284,26 @@ def handler(event: dict, context) -> dict:
             if body.get(f) is None: conn.close(); return resp({"error":f"Поле {f} обязательно"}, 400)
         cur = conn.cursor()
         cur.execute(f"""INSERT INTO {S}.house_projects
-            (name,type,area,floors,rooms,price,tag,tag_color,description,features,roof_type,foundation_type,wall_type,created_by,updated_by)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (name,type,area,floors,rooms,price,tag,tag_color,description,features,roof_type,foundation_type,wall_type,
+             foundation_material,foundation_depth,ext_wall_material,ext_wall_thickness,int_bearing_material,int_bearing_thickness,
+             partition_material,partition_thickness,floor_slab_material,floor_slab_thickness,floor_slab_area,
+             attic_slab_material,attic_slab_thickness,window_material,window_profile,window_color,window_area,
+             door_info,staircase_info,roof_material,roof_area,roof_style,heating_type,water_supply,sewage,electrical,
+             created_by,updated_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (body["name"],body["type"],body["area"],body["floors"],body["rooms"],body["price"],
              body.get("tag",""),body.get("tag_color","#FF6B1A"),body.get("description",""),body.get("features",""),
              body.get("roof_type",""),body.get("foundation_type",""),body.get("wall_type",""),
+             body.get("foundation_material",""),body.get("foundation_depth",""),
+             body.get("ext_wall_material",""),body.get("ext_wall_thickness",""),
+             body.get("int_bearing_material",""),body.get("int_bearing_thickness",""),
+             body.get("partition_material",""),body.get("partition_thickness",""),
+             body.get("floor_slab_material",""),body.get("floor_slab_thickness",""),body.get("floor_slab_area",""),
+             body.get("attic_slab_material",""),body.get("attic_slab_thickness",""),
+             body.get("window_material",""),body.get("window_profile",""),body.get("window_color",""),body.get("window_area",""),
+             body.get("door_info",""),body.get("staircase_info",""),
+             body.get("roof_material",""),body.get("roof_area",""),body.get("roof_style",""),
+             body.get("heating_type",""),body.get("water_supply",""),body.get("sewage",""),body.get("electrical",""),
              staff["id"],staff["id"]))
         new_id = cur.fetchone()[0]
         log(conn, staff["id"], "house_projects", new_id, "create", body["name"])
@@ -284,7 +314,13 @@ def handler(event: dict, context) -> dict:
         if role != "architect": conn.close(); return resp({"error":"Только архитектор"}, 403)
         pid = body.get("project_id")
         if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
-        editable = ["name","type","area","floors","rooms","price","tag","tag_color","description","features","is_active","roof_type","foundation_type","wall_type"]
+        editable = ["name","type","area","floors","rooms","price","tag","tag_color","description","features","is_active",
+                    "roof_type","foundation_type","wall_type",
+                    "foundation_material","foundation_depth","ext_wall_material","ext_wall_thickness",
+                    "int_bearing_material","int_bearing_thickness","partition_material","partition_thickness",
+                    "floor_slab_material","floor_slab_thickness","floor_slab_area","attic_slab_material","attic_slab_thickness",
+                    "window_material","window_profile","window_color","window_area","door_info","staircase_info",
+                    "roof_material","roof_area","roof_style","heating_type","water_supply","sewage","electrical"]
         fields, vals = [], []
         for k in editable:
             if k in body: fields.append(f"{k}=%s"); vals.append(body[k])
@@ -349,7 +385,7 @@ def handler(event: dict, context) -> dict:
             # Чистим временные чанки
             for i in range(total_chunks):
                 try: s3c.delete_object(Bucket="files", Key=f"_tmp/{upload_id}/chunk_{i:05d}")
-                except: pass
+                except Exception: pass
 
             conn.close()
             return resp({"ok":True,"done":True,"cdn_url":cdn_url(final_key),"key":final_key})

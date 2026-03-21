@@ -87,6 +87,16 @@ interface Project {
   description: string; features: string; is_active: boolean;
   created_at: string; files: ProjectFile[]; specs: Spec[];
   roof_type: string; foundation_type: string; wall_type: string;
+  foundation_material: string; foundation_depth: string;
+  ext_wall_material: string; ext_wall_thickness: string;
+  int_bearing_material: string; int_bearing_thickness: string;
+  partition_material: string; partition_thickness: string;
+  floor_slab_material: string; floor_slab_thickness: string; floor_slab_area: string;
+  attic_slab_material: string; attic_slab_thickness: string;
+  window_material: string; window_profile: string; window_color: string; window_area: string;
+  door_info: string; staircase_info: string;
+  roof_material: string; roof_area: string; roof_style: string;
+  heating_type: string; water_supply: string; sewage: string; electrical: string;
 }
 
 interface MatchedTTK {
@@ -1681,6 +1691,16 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
     name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4,
     price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true,
     roof_type: "", foundation_type: "", wall_type: "",
+    foundation_material: "", foundation_depth: "",
+    ext_wall_material: "", ext_wall_thickness: "",
+    int_bearing_material: "", int_bearing_thickness: "",
+    partition_material: "", partition_thickness: "",
+    floor_slab_material: "", floor_slab_thickness: "", floor_slab_area: "",
+    attic_slab_material: "", attic_slab_thickness: "",
+    window_material: "", window_profile: "", window_color: "", window_area: "",
+    door_info: "", staircase_info: "",
+    roof_material: "", roof_area: "", roof_style: "",
+    heating_type: "", water_supply: "", sewage: "", electrical: "",
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -1696,13 +1716,27 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
   useEffect(() => { load(); }, [load]);
 
   const openNew = () => {
-    setForm({ name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4, price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true, roof_type: "", foundation_type: "", wall_type: "" });
+    setForm({ name: "", type: "Кирпичный", area: 100, floors: 2, rooms: 4, price: 5000000, tag: "Новинка", tag_color: "#FF6B1A", description: "", features: "", is_active: true, roof_type: "", foundation_type: "", wall_type: "", foundation_material: "", foundation_depth: "", ext_wall_material: "", ext_wall_thickness: "", int_bearing_material: "", int_bearing_thickness: "", partition_material: "", partition_thickness: "", floor_slab_material: "", floor_slab_thickness: "", floor_slab_area: "", attic_slab_material: "", attic_slab_thickness: "", window_material: "", window_profile: "", window_color: "", window_area: "", door_info: "", staircase_info: "", roof_material: "", roof_area: "", roof_style: "", heating_type: "", water_supply: "", sewage: "", electrical: "" });
     setEditingId(null); setShowForm(true); setMsg("");
   };
 
   const openEdit = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
-    setForm({ name: p.name, type: p.type, area: p.area, floors: p.floors, rooms: p.rooms, price: p.price, tag: p.tag, tag_color: p.tag_color, description: p.description, features: p.features, is_active: p.is_active, roof_type: p.roof_type || "", foundation_type: p.foundation_type || "", wall_type: p.wall_type || "" });
+    setForm({
+      name: p.name, type: p.type, area: p.area, floors: p.floors, rooms: p.rooms, price: p.price,
+      tag: p.tag, tag_color: p.tag_color, description: p.description, features: p.features, is_active: p.is_active,
+      roof_type: p.roof_type || "", foundation_type: p.foundation_type || "", wall_type: p.wall_type || "",
+      foundation_material: p.foundation_material || "", foundation_depth: p.foundation_depth || "",
+      ext_wall_material: p.ext_wall_material || "", ext_wall_thickness: p.ext_wall_thickness || "",
+      int_bearing_material: p.int_bearing_material || "", int_bearing_thickness: p.int_bearing_thickness || "",
+      partition_material: p.partition_material || "", partition_thickness: p.partition_thickness || "",
+      floor_slab_material: p.floor_slab_material || "", floor_slab_thickness: p.floor_slab_thickness || "", floor_slab_area: p.floor_slab_area || "",
+      attic_slab_material: p.attic_slab_material || "", attic_slab_thickness: p.attic_slab_thickness || "",
+      window_material: p.window_material || "", window_profile: p.window_profile || "", window_color: p.window_color || "", window_area: p.window_area || "",
+      door_info: p.door_info || "", staircase_info: p.staircase_info || "",
+      roof_material: p.roof_material || "", roof_area: p.roof_area || "", roof_style: p.roof_style || "",
+      heating_type: p.heating_type || "", water_supply: p.water_supply || "", sewage: p.sewage || "", electrical: p.electrical || "",
+    });
     setEditingId(p.id); setShowForm(true); setMsg("");
   };
 
@@ -1802,13 +1836,9 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                 ))}
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип кровли</label>
-              <select value={form.roof_type} onChange={e => setForm(p => ({ ...p, roof_type: e.target.value }))}
-                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
-                <option value="">— не выбрано —</option>
-                {["Металлочерепица","Профнастил","Мягкая черепица","Керамическая черепица","Фальцевая кровля","Ондулин","Плоская кровля"].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+            {/* ── Фундамент ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "var(--neon-orange)", borderBottom: "1px solid rgba(255,107,26,0.2)" }}>🏗️ Фундамент</div>
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип фундамента</label>
@@ -1819,12 +1849,185 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип стен</label>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Материал фундамента</label>
+              <input type="text" value={form.foundation_material} onChange={e => setForm(p => ({ ...p, foundation_material: e.target.value }))}
+                placeholder="Бетон B25, арматура A500C" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Глубина / высота</label>
+              <input type="text" value={form.foundation_depth} onChange={e => setForm(p => ({ ...p, foundation_depth: e.target.value }))}
+                placeholder="1.8 м / 0.5 м" className={inp} style={inpSty} />
+            </div>
+
+            {/* ── Стены ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "var(--neon-cyan)", borderBottom: "1px solid rgba(0,212,255,0.2)" }}>🧱 Стены</div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Материал несущих стен</label>
+              <input type="text" value={form.ext_wall_material} onChange={e => setForm(p => ({ ...p, ext_wall_material: e.target.value }))}
+                placeholder="Кирпич, Газоблок, Кирпич/Газоблок" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Толщина внешних стен</label>
+              <input type="text" value={form.ext_wall_thickness} onChange={e => setForm(p => ({ ...p, ext_wall_thickness: e.target.value }))}
+                placeholder="380 мм" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип стен (общий)</label>
               <select value={form.wall_type} onChange={e => setForm(p => ({ ...p, wall_type: e.target.value }))}
                 className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
                 <option value="">— не выбрано —</option>
                 {["Кирпич","Газобетон","Каркасные стены","СИП-панели","Монолитный бетон","Брус","Бревно"].map(t => <option key={t} value={t}>{t}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Внутр. несущие стены (материал)</label>
+              <input type="text" value={form.int_bearing_material} onChange={e => setForm(p => ({ ...p, int_bearing_material: e.target.value }))}
+                placeholder="Кирпич М150" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Толщина внутр. несущих</label>
+              <input type="text" value={form.int_bearing_thickness} onChange={e => setForm(p => ({ ...p, int_bearing_thickness: e.target.value }))}
+                placeholder="250 мм" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Перегородки (материал)</label>
+              <input type="text" value={form.partition_material} onChange={e => setForm(p => ({ ...p, partition_material: e.target.value }))}
+                placeholder="Газоблок D400" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Толщина перегородок</label>
+              <input type="text" value={form.partition_thickness} onChange={e => setForm(p => ({ ...p, partition_thickness: e.target.value }))}
+                placeholder="100 мм" className={inp} style={inpSty} />
+            </div>
+
+            {/* ── Перекрытия ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "#A855F7", borderBottom: "1px solid rgba(168,85,247,0.2)" }}>📐 Перекрытия</div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Межэтажное перекрытие</label>
+              <input type="text" value={form.floor_slab_material} onChange={e => setForm(p => ({ ...p, floor_slab_material: e.target.value }))}
+                placeholder="ЖБ плиты ПК" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Толщина / площадь</label>
+              <input type="text" value={form.floor_slab_thickness} onChange={e => setForm(p => ({ ...p, floor_slab_thickness: e.target.value }))}
+                placeholder="220 мм" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Площадь перекрытий</label>
+              <input type="text" value={form.floor_slab_area} onChange={e => setForm(p => ({ ...p, floor_slab_area: e.target.value }))}
+                placeholder="120 м²" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Чердачное перекрытие</label>
+              <input type="text" value={form.attic_slab_material} onChange={e => setForm(p => ({ ...p, attic_slab_material: e.target.value }))}
+                placeholder="Деревянные балки" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Толщина чердачного</label>
+              <input type="text" value={form.attic_slab_thickness} onChange={e => setForm(p => ({ ...p, attic_slab_thickness: e.target.value }))}
+                placeholder="200 мм" className={inp} style={inpSty} />
+            </div>
+
+            {/* ── Окна и двери ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "#06B6D4", borderBottom: "1px solid rgba(6,182,212,0.2)" }}>🪟 Окна и двери</div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Материал окон</label>
+              <select value={form.window_material} onChange={e => setForm(p => ({ ...p, window_material: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["ПВХ","Дерево","Алюминий","Дерево-алюминий"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Профиль / стеклопакет</label>
+              <input type="text" value={form.window_profile} onChange={e => setForm(p => ({ ...p, window_profile: e.target.value }))}
+                placeholder="70 мм / двухкамерный" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Цвет окон</label>
+              <input type="text" value={form.window_color} onChange={e => setForm(p => ({ ...p, window_color: e.target.value }))}
+                placeholder="Белый / Антрацит" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Площадь остекления</label>
+              <input type="text" value={form.window_area} onChange={e => setForm(p => ({ ...p, window_area: e.target.value }))}
+                placeholder="32 м²" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Двери (описание)</label>
+              <input type="text" value={form.door_info} onChange={e => setForm(p => ({ ...p, door_info: e.target.value }))}
+                placeholder="Входная — металл, межком. — МДФ" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Лестницы</label>
+              <input type="text" value={form.staircase_info} onChange={e => setForm(p => ({ ...p, staircase_info: e.target.value }))}
+                placeholder="Монолитная ЖБ с облицовкой деревом" className={inp} style={inpSty} />
+            </div>
+
+            {/* ── Кровля ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "#10B981", borderBottom: "1px solid rgba(16,185,129,0.2)" }}>🏠 Кровля</div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Тип кровли</label>
+              <select value={form.roof_type} onChange={e => setForm(p => ({ ...p, roof_type: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["Металлочерепица","Профнастил","Мягкая черепица","Керамическая черепица","Фальцевая кровля","Ондулин","Плоская кровля"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Материал кровли</label>
+              <input type="text" value={form.roof_material} onChange={e => setForm(p => ({ ...p, roof_material: e.target.value }))}
+                placeholder="Металлочерепица Монтеррей 0.5 мм" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Площадь кровли</label>
+              <input type="text" value={form.roof_area} onChange={e => setForm(p => ({ ...p, roof_area: e.target.value }))}
+                placeholder="180 м²" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Вид кровли (форма)</label>
+              <input type="text" value={form.roof_style} onChange={e => setForm(p => ({ ...p, roof_style: e.target.value }))}
+                placeholder="Двускатная, четырёхскатная, вальмовая" className={inp} style={inpSty} />
+            </div>
+
+            {/* ── Инженерные системы ── */}
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "#FBBF24", borderBottom: "1px solid rgba(251,191,36,0.2)" }}>⚙️ Инженерные системы</div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Отопление</label>
+              <select value={form.heating_type} onChange={e => setForm(p => ({ ...p, heating_type: e.target.value }))}
+                className={inp} style={{ ...inpSty, background: "#1a1f2e" }}>
+                <option value="">— не выбрано —</option>
+                {["Радиаторы","Тёплый пол","Комбинированное (радиаторы + тёплый пол)","Воздушное отопление"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Водоснабжение</label>
+              <input type="text" value={form.water_supply} onChange={e => setForm(p => ({ ...p, water_supply: e.target.value }))}
+                placeholder="Центральное / Скважина" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Канализация</label>
+              <input type="text" value={form.sewage} onChange={e => setForm(p => ({ ...p, sewage: e.target.value }))}
+                placeholder="Центральная / Септик" className={inp} style={inpSty} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Электрика / освещение</label>
+              <input type="text" value={form.electrical} onChange={e => setForm(p => ({ ...p, electrical: e.target.value }))}
+                placeholder="380В, 15 кВт, скрытая проводка" className={inp} style={inpSty} />
+            </div>
+
+            <div className="sm:col-span-2 lg:col-span-3 mt-2">
+              <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-1" style={{ color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>📝 Описание и маркетинг</div>
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
               <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Описание</label>
