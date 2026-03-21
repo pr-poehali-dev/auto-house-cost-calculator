@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 
 const ORDER_URL = "https://functions.poehali.dev/5cd1eb69-9a08-4572-ae2a-bc11e49da506";
 const COMPANY_URL = "https://functions.poehali.dev/0796a927-18d1-46be-bd26-3bbcfe93738d";
+const SUPPLIER_API = "https://functions.poehali.dev/0864e1a5-8fce-4370-a525-80d6700b50ee";
 
 interface SalesManagerProps {
   user: { id: number; full_name: string; role_code: string };
@@ -100,6 +101,16 @@ interface ContractTemplate {
   id: number;
   name: string;
   type: string;
+}
+
+interface RfqBrief {
+  id: number;
+  title: string;
+  construction_address: string;
+  status: string;
+  proposals_count: number;
+  deadline: string | null;
+  created_at: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -504,6 +515,7 @@ function OrderDetail({
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [templates, setTemplates] = useState<ContractTemplate[]>([]);
+  const [rfqs, setRfqs] = useState<RfqBrief[]>([]);
 
   const loadOrder = useCallback(() => {
     apiFetch(`${ORDER_URL}?action=get&order_id=${orderId}`, {}, token).then((r) => {
@@ -527,6 +539,12 @@ function OrderDetail({
       apiFetch(`${COMPANY_URL}?action=templates`).then((r) =>
         setTemplates(r.templates || [])
       );
+    }
+    if (tab === "supply") {
+      apiFetch(`${SUPPLIER_API}?action=rfq_list`, {}, token).then((r) => {
+        const all: RfqBrief[] = r.rfqs || [];
+        setRfqs(all.filter((rfq) => (rfq as unknown as { order_id?: number }).order_id === orderId));
+      });
     }
   }, [tab, orderId, token]);
 
@@ -552,6 +570,7 @@ function OrderDetail({
     { id: "vor", label: "ВОР", icon: "ClipboardList" },
     { id: "proposal", label: "КП", icon: "FileText" },
     { id: "contract", label: "Договор", icon: "ScrollText" },
+    { id: "supply", label: "Снабжение", icon: "Truck" },
     { id: "history", label: "История", icon: "Clock" },
   ] as const;
 
@@ -641,6 +660,9 @@ function OrderDetail({
           templates={templates}
           token={token}
         />
+      )}
+      {tab === "supply" && (
+        <SupplyTab orderId={order.id} rfqs={rfqs} address={order.address} />
       )}
       {tab === "history" && (
         <HistoryTab order={order} token={token} onRefresh={loadOrder} />
@@ -1267,6 +1289,91 @@ function ContractTab({
                   Согласовать
                 </button>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Supply Tab ───────────────────────────────────────────────────────────────
+
+const RFQ_STATUS_LABELS: Record<string, string> = {
+  open: "Открыт", awarded: "Выбран поставщик", closed: "Закрыт",
+};
+const RFQ_STATUS_COLORS: Record<string, string> = {
+  open: "#FBBF24", awarded: "#00FF88", closed: "#6B7280",
+};
+
+function SupplyTab({ orderId, rfqs, address }: { orderId: number; rfqs: RfqBrief[]; address?: string }) {
+  return (
+    <div className="space-y-4">
+      {/* Адрес объекта */}
+      {address && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)" }}>
+          <Icon name="MapPin" size={16} style={{ color: "#FBBF24", flexShrink: 0 }} />
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Адрес объекта</p>
+            <p className="text-sm text-white">{address}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Заголовок */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.4)" }}>
+          Запросы коммерческих предложений
+        </p>
+        <span className="text-xs px-2 py-1 rounded-lg" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+          {rfqs.length} запр.
+        </span>
+      </div>
+
+      {rfqs.length === 0 ? (
+        <div className="rounded-2xl px-6 py-10 flex flex-col items-center gap-3 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.1)" }}>
+          <Icon name="Truck" size={28} style={{ color: "rgba(255,255,255,0.15)" }} />
+          <p className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>По этому заказу ещё нет запросов КП</p>
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>Снабженец создаст запрос через свой кабинет, выбрав заказ №{orderId}</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rfqs.map((rfq) => (
+            <div key={rfq.id} className="rounded-2xl px-4 py-3.5" style={CARD_S}>
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-white truncate">{rfq.title}</span>
+                    <span className="px-2 py-0.5 rounded-md text-xs font-medium flex-shrink-0"
+                      style={{ background: `${RFQ_STATUS_COLORS[rfq.status] || "#888"}20`, color: RFQ_STATUS_COLORS[rfq.status] || "#888" }}>
+                      {RFQ_STATUS_LABELS[rfq.status] || rfq.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    <Icon name="MapPin" size={11} />
+                    <span className="text-xs">{rfq.construction_address}</span>
+                  </div>
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <Icon name="Users" size={12} style={{ color: "#00D4FF" }} />
+                    <span className="text-sm font-bold" style={{ color: "#00D4FF" }}>{rfq.proposals_count}</span>
+                  </div>
+                  <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>предл.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 pt-2.5" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex items-center gap-1.5">
+                  <Icon name="Calendar" size={11} style={{ color: "rgba(255,255,255,0.3)" }} />
+                  <span className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    {rfq.deadline ? `Срок: ${new Date(rfq.deadline).toLocaleDateString("ru-RU")}` : "Срок не указан"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Icon name="Clock" size={11} style={{ color: "rgba(255,255,255,0.3)" }} />
+                  <span className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{relativeTime(rfq.created_at)}</span>
+                </div>
+              </div>
             </div>
           ))}
         </div>
