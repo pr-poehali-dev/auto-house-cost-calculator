@@ -1793,14 +1793,14 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
 
       {/* Form Modal */}
       {showForm && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
-          <div className="rounded-2xl w-full max-w-4xl my-4 shadow-2xl" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.25)" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "16px", overflowY: "auto" }}>
+          <div style={{ background: "#1E2535", border: "1px solid rgba(0,212,255,0.3)", borderRadius: 16, width: "100%", maxWidth: 900, margin: "16px 0", boxShadow: "0 25px 60px rgba(0,0,0,0.6)" }}>
           {/* Sticky header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 rounded-t-2xl" style={{ background: "var(--card-bg)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-            <h3 className="font-display font-semibold text-lg text-white">
+          <div style={{ position: "sticky", top: 0, zIndex: 10, background: "#1E2535", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRadius: "16px 16px 0 0", padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ color: "#fff", fontSize: 18, fontWeight: 700, margin: 0 }}>
               {editingId ? "Редактировать проект" : "Новый проект"}
             </h3>
-            <button onClick={() => setShowForm(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors" style={{ color: "rgba(255,255,255,0.5)" }}>
+            <button onClick={() => setShowForm(false)} style={{ background: "rgba(255,255,255,0.08)", border: "none", borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(255,255,255,0.6)" }}>
               <Icon name="X" size={16} />
             </button>
           </div>
@@ -2048,10 +2048,9 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                 placeholder="Панорамные окна, Открытая планировка, Эко-материалы" className={inp} style={inpSty} />
             </div>
           </div>
-
           </div>
           {/* Sticky footer */}
-          <div className="sticky bottom-0 px-6 py-4 rounded-b-2xl flex items-center gap-3" style={{ background: "var(--card-bg)", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+          <div style={{ position: "sticky", bottom: 0, background: "#1E2535", borderTop: "1px solid rgba(255,255,255,0.08)", borderRadius: "0 0 16px 16px", padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={save} disabled={saving}
               className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
               style={{ background: "var(--neon-cyan)", color: "#0A0D14" }}>
