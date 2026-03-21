@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
 const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
+const SPEC_AI_URL = "https://functions.poehali.dev/8ecbdbca-904c-4ffc-a3b2-3279170e95ee";
 const CHUNK_SIZE = 512 * 1024; // 512КБ бинарных → ~700КБ base64, гарантированно в лимите платформы
 
 async function uploadFileChunked(
@@ -1202,9 +1203,14 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   };
 
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [aiParsedItems, setAiParsedItems] = useState<{section:string;name:string;unit:string;qty:number;price_per_unit:number;note:string}[]>([]);
+  const [aiParseLoading, setAiParseLoading] = useState(false);
+  const [aiParseMsg, setAiParseMsg] = useState("");
+  const [addingToSpec, setAddingToSpec] = useState(false);
 
   const uploadFile = async (file: File) => {
     setUploading(true); setUploadMsg(""); setUploadProgress(0);
+    setAiParsedItems([]); setAiParseMsg("");
     try {
       const result = await uploadFileChunked(file, project.id, selectedFileType, token, setUploadProgress);
       if (!result) { setUploadMsg("Ошибка загрузки файла"); setUploading(false); return; }
@@ -1213,10 +1219,61 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
         method: "POST",
         body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType, cdn_url: result.cdn_url }),
       }, token);
-      if (r2.ok) { setUploadMsg("Файл загружен!"); loadProject(); onRefresh(); }
-      else setUploadMsg(r2.error || "Ошибка подтверждения");
+      if (r2.ok) {
+        setUploadMsg("Файл загружен!");
+        loadProject(); onRefresh();
+
+        // Для spec и project_full — автоматически запускаем AI-разбор
+        const parseable = ["spec","project_full","other"].includes(selectedFileType)
+          && file.name.match(/\.(pdf|xlsx|xls|csv)$/i);
+        if (parseable) {
+          setAiParseLoading(true);
+          setAiParseMsg("AI читает файл и извлекает позиции...");
+          const s3key = result.key;
+          const ra = await apiFetch(`${SPEC_AI_URL}?action=upload_spec`, {
+            method: "POST",
+            body: JSON.stringify({ project_id: project.id, file_name: file.name, s3_key: s3key }),
+          }, token);
+          setAiParseLoading(false);
+          if (ra.items && ra.items.length > 0) {
+            setAiParsedItems(ra.items);
+            setAiParseMsg(`AI нашёл ${ra.items.length} позиций — добавить в ведомость?`);
+          } else {
+            setAiParseMsg(ra.error || "AI не смог извлечь позиции из файла");
+          }
+        }
+      } else {
+        setUploadMsg(r2.error || "Ошибка подтверждения");
+      }
     } catch (e) { setUploadMsg("Ошибка загрузки: " + String(e)); }
     setUploading(false);
+  };
+
+  const addParsedItemsToSpec = async () => {
+    if (!aiParsedItems.length) return;
+    setAddingToSpec(true);
+    // Создаём ведомость если нет
+    let specId = spec?.id;
+    if (!specId) {
+      await apiFetch(`${PROJECTS_URL}?action=spec_create`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, title: `Ведомость ОР — ${proj.name}`, items: [] }),
+      }, token);
+      await loadSpec();
+      const rs = await apiFetch(`${PROJECTS_URL}?action=spec_get&project_id=${project.id}`, {}, token);
+      specId = rs.spec?.id;
+    }
+    // Добавляем позиции по одной
+    for (const item of aiParsedItems) {
+      await apiFetch(`${PROJECTS_URL}?action=spec_add_item`, {
+        method: "POST",
+        body: JSON.stringify({ spec_id: specId, ...item }),
+      }, token);
+    }
+    setAddingToSpec(false);
+    setAiParsedItems([]);
+    setAiParseMsg(`✓ ${aiParsedItems.length} позиций добавлено в ведомость`);
+    loadSpec();
   };
 
   const deleteFile = async (fileId: number) => {
@@ -1380,6 +1437,52 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
               </div>
             )}
             {uploadMsg && <div className="mt-2 text-sm" style={{ color: uploadMsg.includes("!") ? "var(--neon-green)" : "#ef4444" }}>{uploadMsg}</div>}
+
+            {/* AI-разбор файла */}
+            {(aiParseLoading || aiParseMsg) && (
+              <div className="mt-4 rounded-xl p-4" style={{ background: "rgba(0,255,136,0.06)", border: "1px solid rgba(0,255,136,0.2)" }}>
+                {aiParseLoading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/10 rounded-full animate-spin flex-shrink-0" style={{ borderTopColor: "var(--neon-green)" }} />
+                    <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>{aiParseMsg}</span>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Icon name={aiParsedItems.length > 0 ? "CheckCircle" : "AlertCircle"} size={15}
+                          style={{ color: aiParsedItems.length > 0 ? "var(--neon-green)" : "#FBBF24", flexShrink: 0 }} />
+                        <span className="text-sm font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>{aiParseMsg}</span>
+                      </div>
+                      {aiParsedItems.length > 0 && (
+                        <button onClick={addParsedItemsToSpec} disabled={addingToSpec}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-60 flex-shrink-0"
+                          style={{ background: "var(--neon-green)", color: "#0a0d14" }}>
+                          <Icon name={addingToSpec ? "Loader2" : "PlusCircle"} size={13} className={addingToSpec ? "animate-spin" : ""} />
+                          {addingToSpec ? "Добавляю..." : "Добавить в ведомость"}
+                        </button>
+                      )}
+                    </div>
+                    {aiParsedItems.length > 0 && (
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {aiParsedItems.slice(0, 10).map((it, i) => (
+                          <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs"
+                            style={{ background: "rgba(255,255,255,0.04)" }}>
+                            <span style={{ color: "rgba(255,255,255,0.7)" }}>{it.section} · {it.name}</span>
+                            <span style={{ color: "rgba(255,255,255,0.35)" }}>{it.qty} {it.unit}</span>
+                          </div>
+                        ))}
+                        {aiParsedItems.length > 10 && (
+                          <div className="text-xs text-center py-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+                            и ещё {aiParsedItems.length - 10} позиций...
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Файлы по разделам */}
