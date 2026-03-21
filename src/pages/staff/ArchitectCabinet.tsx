@@ -1790,13 +1790,20 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
         </div>
       </div>
 
-      {/* Form */}
+      {/* Form Modal */}
       {showForm && (
-        <div className="rounded-2xl p-6 mb-6 animate-scale-in"
-          style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.25)" }}>
-          <h3 className="font-display font-semibold text-lg text-white mb-5">
-            {editingId ? "Редактировать проект" : "Новый проект"}
-          </h3>
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
+          <div className="rounded-2xl w-full max-w-4xl my-4 shadow-2xl" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.25)" }}>
+          {/* Sticky header */}
+          <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 rounded-t-2xl" style={{ background: "var(--card-bg)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            <h3 className="font-display font-semibold text-lg text-white">
+              {editingId ? "Редактировать проект" : "Новый проект"}
+            </h3>
+            <button onClick={() => setShowForm(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors" style={{ color: "rgba(255,255,255,0.5)" }}>
+              <Icon name="X" size={16} />
+            </button>
+          </div>
+          <div className="p-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="sm:col-span-2">
               <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>Название *</label>
@@ -2041,14 +2048,9 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
             </div>
           </div>
 
-          {msg && (
-            <div className="mt-3 text-sm px-3 py-2 rounded-xl"
-              style={{ background: msg === "Сохранено!" ? "rgba(0,255,136,0.1)" : "rgba(239,68,68,0.1)", color: msg === "Сохранено!" ? "var(--neon-green)" : "#ef4444" }}>
-              {msg}
-            </div>
-          )}
-
-          <div className="flex gap-3 mt-5">
+          </div>
+          {/* Sticky footer */}
+          <div className="sticky bottom-0 px-6 py-4 rounded-b-2xl flex items-center gap-3" style={{ background: "var(--card-bg)", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
             <button onClick={save} disabled={saving}
               className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
               style={{ background: "var(--neon-cyan)", color: "#0A0D14" }}>
@@ -2059,6 +2061,12 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
               style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)" }}>
               Отмена
             </button>
+            {msg && (
+              <span className="text-sm px-3 py-1.5 rounded-xl"
+                style={{ background: msg === "Сохранено!" ? "rgba(0,255,136,0.1)" : "rgba(239,68,68,0.1)", color: msg === "Сохранено!" ? "var(--neon-green)" : "#ef4444" }}>
+                {msg}
+              </span>
+            )}
             <label className="flex items-center gap-2 ml-auto cursor-pointer select-none">
               <div
                 onClick={() => setForm(p => ({ ...p, is_active: !p.is_active }))}
@@ -2068,9 +2076,10 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                   style={{ left: form.is_active ? "calc(100% - 18px)" : "2px", boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }} />
               </div>
               <span className="text-sm font-medium" style={{ color: form.is_active ? "var(--neon-green)" : "rgba(255,255,255,0.4)" }}>
-                {form.is_active ? "Опубликован на сайте" : "Черновик (не виден)"}
+                {form.is_active ? "Опубликован" : "Черновик"}
               </span>
             </label>
+          </div>
           </div>
         </div>
       )}
