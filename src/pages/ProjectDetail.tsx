@@ -16,7 +16,39 @@ interface Project {
   price: number; tag: string; tag_color: string; description: string; features: string;
   is_active: boolean; created_at: string; updated_at: string;
   roof_type?: string; foundation_type?: string; wall_type?: string;
-  files: ProjectFile[]; specs: Spec[];
+  files: ProjectFile[]; specs?: Spec[]; spec?: Spec | null;
+}
+
+// Расчётная смета на основе площади — показывается если реальной нет
+function buildEstimate(area: number, price: number): SpecItem[] {
+  const shares: [string, string, number][] = [
+    ["Фундамент", "Устройство монолитного фундамента", 0.12],
+    ["Фундамент", "Гидроизоляция фундамента", 0.02],
+    ["Стены", "Кладка / монтаж несущих стен", 0.22],
+    ["Стены", "Утепление и облицовка фасада", 0.06],
+    ["Перекрытия", "Устройство межэтажного перекрытия", 0.07],
+    ["Кровля", "Стропильная система", 0.05],
+    ["Кровля", "Кровельное покрытие и водосток", 0.04],
+    ["Окна и двери", "Поставка и монтаж окон", 0.06],
+    ["Окна и двери", "Входная и межкомнатные двери", 0.03],
+    ["Инженерия", "Отопление и тёплый пол", 0.07],
+    ["Инженерия", "Водоснабжение и канализация", 0.05],
+    ["Инженерия", "Электромонтаж", 0.04],
+    ["Отделка", "Черновая отделка стен и полов", 0.08],
+    ["Отделка", "Чистовая отделка (покраска, плитка)", 0.06],
+    ["Прочее", "Благоустройство и отмостка", 0.02],
+    ["Прочее", "Непредвиденные расходы (резерв 3%)", 0.01],
+  ];
+  return shares.map(([ section, name, share], idx) => ({
+    id: idx + 1,
+    section,
+    name,
+    unit: "м²",
+    qty: area,
+    price_per_unit: Math.round((price * share) / area),
+    total_price: Math.round(price * share),
+    note: "",
+  }));
 }
 
 const FILE_TYPE_LABELS: Record<string, string> = {
@@ -35,8 +67,6 @@ export default function ProjectDetail() {
   const [notFound, setNotFound] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
   const [activeTab, setActiveTab] = useState<"overview" | "drawings" | "spec" | "request">("overview");
-  const [spec, setSpec] = useState<Spec | null>(null);
-  const [loadingSpec, setLoadingSpec] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
 
   // Форма заявки
@@ -55,15 +85,6 @@ export default function ProjectDetail() {
       })
       .catch(() => { setNotFound(true); setLoading(false); });
   }, [id]);
-
-  useEffect(() => {
-    if (activeTab === "spec" && project && !spec && !loadingSpec) {
-      setLoadingSpec(true);
-      fetch(`${PROJECTS_API}?action=spec_get&project_id=${project.id}`)
-        .then(r => r.json())
-        .then(r => { setSpec(r.spec || null); setLoadingSpec(false); });
-    }
-  }, [activeTab, project, spec, loadingSpec]);
 
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,16 +141,20 @@ export default function ProjectDetail() {
   const features = project.features ? project.features.split("\n").filter(Boolean) : [];
   const tagColor = project.tag_color || "#FF6B1A";
 
-  // Смета — группировка по разделам
-  const specSections = spec?.items
-    ? Array.from(new Set(spec.items.map(i => i.section))).map((section, idx) => ({
-        section,
-        color: SECTION_COLORS[idx % SECTION_COLORS.length],
-        items: spec.items!.filter(i => i.section === section),
-        total: spec.items!.filter(i => i.section === section).reduce((s, i) => s + i.total_price, 0),
-      }))
-    : [];
-  const specTotal = spec?.items?.reduce((s, i) => s + i.total_price, 0) || 0;
+  // Смета: реальная из БД или расчётная по площади
+  const realSpec = project.spec;
+  const isEstimate = !realSpec?.items?.length;
+  const specItems: SpecItem[] = realSpec?.items?.length
+    ? realSpec.items
+    : buildEstimate(project.area, project.price);
+
+  const specSections = Array.from(new Set(specItems.map(i => i.section))).map((section, idx) => ({
+    section,
+    color: SECTION_COLORS[idx % SECTION_COLORS.length],
+    items: specItems.filter(i => i.section === section),
+    total: specItems.filter(i => i.section === section).reduce((s, i) => s + i.total_price, 0),
+  }));
+  const specTotal = specItems.reduce((s, i) => s + i.total_price, 0);
 
   const TABS = [
     { id: "overview", label: "Описание", icon: "FileText" },
@@ -445,28 +470,40 @@ export default function ProjectDetail() {
         {/* ── Смета ── */}
         {activeTab === "spec" && (
           <div className="animate-fade-in">
-            {loadingSpec ? (
-              <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>
-                <div className="w-8 h-8 border-2 border-white/10 rounded-full mx-auto mb-3 animate-spin"
-                  style={{ borderTopColor: tagColor }} />
-                Загружаем смету...
-              </div>
-            ) : !spec || !spec.items?.length ? (
-              <div className="rounded-2xl p-16 text-center" style={{ background: "var(--card-bg)", border: "1px dashed rgba(255,255,255,0.1)" }}>
-                <Icon name="ClipboardList" size={40} style={{ color: "rgba(255,255,255,0.1)", margin: "0 auto 12px" }} />
-                <p className="text-white font-semibold mb-1">Смета ещё не составлена</p>
-                <p className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>Конструктор добавит позиции в ближайшее время</p>
-              </div>
-            ) : (
               <div className="space-y-4">
+                {/* Баннер: расчётная или утверждённая */}
+                {isEstimate ? (
+                  <div className="rounded-2xl p-4 flex items-start gap-3"
+                    style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
+                    <Icon name="Info" size={16} style={{ color: "#FBBF24", flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-0.5">Предварительная расчётная смета</p>
+                      <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+                        Детальная смета с реальными ценами от поставщиков появится после завершения проектирования.
+                        Сейчас показан ориентировочный расчёт на основе стоимости {fmt(project.price)} ₽ и площади {project.area} м².
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl p-4 flex items-center gap-3"
+                    style={{ background: "rgba(0,255,136,0.07)", border: "1px solid rgba(0,255,136,0.2)" }}>
+                    <Icon name="CheckCircle2" size={16} style={{ color: "#00FF88", flexShrink: 0 }} />
+                    <p className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>
+                      Детальная смета · версия {realSpec?.version} · {realSpec?.status === "approved" ? "✓ Утверждена конструктором" : "На согласовании"}
+                    </p>
+                  </div>
+                )}
+
                 {/* Итог вверху */}
                 <div className="rounded-2xl p-5 flex items-center justify-between flex-wrap gap-4"
                   style={{ background: `${tagColor}0d`, border: `1px solid ${tagColor}33` }}>
                   <div>
-                    <div className="text-xs mb-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>Итого по смете</div>
+                    <div className="text-xs mb-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      {isEstimate ? "Ориентировочная стоимость" : "Итого по смете"}
+                    </div>
                     <div className="font-display font-black text-2xl" style={{ color: tagColor }}>{fmt(specTotal)} ₽</div>
                     <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
-                      {spec.items.length} позиций · версия {spec.version} · {spec.status === "approved" ? "✓ Утверждена" : "Черновик"}
+                      {specItems.length} позиций · {fmt(Math.round(specTotal / project.area))} ₽/м²
                     </div>
                   </div>
                   <button onClick={() => setActiveTab("request")}
@@ -535,7 +572,6 @@ export default function ProjectDetail() {
                   );
                 })}
               </div>
-            )}
           </div>
         )}
 

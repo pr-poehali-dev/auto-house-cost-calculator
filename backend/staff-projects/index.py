@@ -86,12 +86,35 @@ def handler(event: dict, context) -> dict:
         pid = qs.get("project_id")
         if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at FROM {S}.house_projects WHERE id=%s", (pid,))
+        cur.execute(f"""
+            SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,
+                   is_active,created_by,updated_by,created_at,updated_at,
+                   roof_type,foundation_type,wall_type
+            FROM {S}.house_projects WHERE id=%s AND is_active=TRUE
+        """, (pid,))
         r = cur.fetchone()
         if not r: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
         p = project_row(r)
         cur.execute(f"SELECT id,file_type,file_url,file_name,sort_order FROM {S}.project_files WHERE project_id=%s ORDER BY file_type,sort_order", (p["id"],))
         p["files"] = [{"id":f[0],"file_type":f[1],"file_url":f[2],"file_name":f[3],"sort_order":f[4]} for f in cur.fetchall()]
+        # Публичная смета (последняя утверждённая версия)
+        cur.execute(f"""
+            SELECT ps.id,ps.title,ps.version,ps.status,ps.created_at,ps.updated_at
+            FROM {S}.project_specs ps
+            WHERE ps.project_id=%s
+            ORDER BY ps.status='approved' DESC, ps.version DESC LIMIT 1
+        """, (pid,))
+        spec_row = cur.fetchone()
+        if spec_row:
+            spec = {"id":spec_row[0],"title":spec_row[1],"version":spec_row[2],"status":spec_row[3],"created_at":str(spec_row[4]),"updated_at":str(spec_row[5])}
+            cur.execute(f"""
+                SELECT id,section,name,unit,qty,price_per_unit,total_price,note
+                FROM {S}.spec_items WHERE spec_id=%s ORDER BY section,id
+            """, (spec_row[0],))
+            spec["items"] = [{"id":i[0],"section":i[1],"name":i[2],"unit":i[3],"qty":float(i[4]),"price_per_unit":float(i[5]),"total_price":float(i[6]),"note":i[7] or ""} for i in cur.fetchall()]
+            p["spec"] = spec
+        else:
+            p["spec"] = None
         cur.close(); conn.close()
         return resp({"project": p})
 
