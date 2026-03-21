@@ -32,6 +32,7 @@ interface Order {
   created_at: string;
   updated_at: string;
   house_project_id?: number;
+  company_id?: number;
   files?: OrderFile[];
   specs?: OrderSpec[];
   events?: LeadEvent[];
@@ -634,6 +635,7 @@ function OrderDetail({
       {tab === "contract" && (
         <ContractTab
           orderId={order.id}
+          orderCompanyId={order.company_id}
           contracts={contracts}
           setContracts={setContracts}
           templates={templates}
@@ -1136,9 +1138,10 @@ function ProposalTab({
 // ─── Contract Tab ─────────────────────────────────────────────────────────────
 
 function ContractTab({
-  orderId, contracts, setContracts, templates, token,
+  orderId, orderCompanyId, contracts, setContracts, templates, token,
 }: {
   orderId: number;
+  orderCompanyId?: number;
   contracts: Contract[];
   setContracts: React.Dispatch<React.SetStateAction<Contract[]>>;
   templates: ContractTemplate[];
@@ -1146,13 +1149,29 @@ function ContractTab({
 }) {
   const [creating, setCreating] = useState(false);
   const [selectedTpl, setSelectedTpl] = useState<string>("");
+  const [selectedCompany, setSelectedCompany] = useState<string>(orderCompanyId ? String(orderCompanyId) : "");
+  const [companies, setCompanies] = useState<{ id: number; company_name: string; is_default: boolean }[]>([]);
   const [msg, setMsg] = useState("");
   const [approvingId, setApprovingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch(`${COMPANY_URL}?action=companies`)
+      .then((r) => r.json())
+      .then((r) => {
+        const list = r.companies || [];
+        setCompanies(list);
+        if (!selectedCompany) {
+          const def = list.find((c: { is_default: boolean }) => c.is_default);
+          if (def) setSelectedCompany(String(def.id));
+        }
+      });
+  }, []);
 
   const createContract = async () => {
     setCreating(true);
     const body: Record<string, unknown> = { order_id: orderId };
     if (selectedTpl) body.template_id = parseInt(selectedTpl);
+    if (selectedCompany) body.company_id = parseInt(selectedCompany);
     const res = await apiFetch(`${ORDER_URL}?action=create_contract`, { method: "POST", body: JSON.stringify(body) }, token);
     setCreating(false);
     if (res.error) { setMsg(`Ошибка: ${res.error}`); return; }
@@ -1174,6 +1193,23 @@ function ContractTab({
         <p className="text-xs font-semibold uppercase tracking-widest" style={LBL_S}>Договоры</p>
         <div className="flex items-center gap-3 flex-wrap">
           {msg && <span className="text-xs" style={{ color: msg.startsWith("Ошибка") ? "#ef4444" : "#00FF88" }}>{msg}</span>}
+          {companies.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Icon name="Building2" size={13} style={{ color: "rgba(255,255,255,0.35)" }} />
+              <select
+                className="px-3 py-2 rounded-xl text-xs text-white outline-none"
+                style={INP_S} value={selectedCompany}
+                onChange={(e) => setSelectedCompany(e.target.value)}
+              >
+                <option value="">Организация не выбрана</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company_name}{c.is_default ? " (основная)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {templates.length > 0 && (
             <select
               className="px-3 py-2 rounded-xl text-xs text-white outline-none"

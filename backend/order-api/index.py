@@ -362,6 +362,9 @@ def handler(event: dict, context) -> dict:
             if "house_project_id" in body:
                 v = body["house_project_id"]
                 sets.append(f"house_project_id={str(int(v)) if v else 'NULL'}")
+            if "company_id" in body:
+                v = body["company_id"]
+                sets.append(f"company_id={str(int(v)) if v else 'NULL'}")
             if not sets:
                 return resp({"error": "Нет полей для обновления"}, 400)
             cur = conn.cursor()
@@ -622,22 +625,43 @@ def handler(event: dict, context) -> dict:
 
             # get order
             cur.execute(
-                f"SELECT client_name, client_phone, client_email, address, budget "
+                f"SELECT client_name, client_phone, client_email, address, budget, company_id "
                 f"FROM {S}.orders WHERE id={oid}"
             )
             order_row = cur.fetchone()
             if not order_row:
                 cur.close()
                 return resp({"error": "Заказ не найден"}, 404)
-            client_name, client_phone, client_email, address, budget = order_row
+            client_name, client_phone, client_email, address, budget, order_company_id = order_row
 
-            # get company settings
-            cur.execute(f"SELECT company_name, inn, legal_address, director_name FROM {S}.company_settings WHERE id=1")
+            # company_id: из тела запроса > из заказа > дефолтная
+            use_company_id = body.get("company_id") or order_company_id
+            if use_company_id:
+                cur.execute(
+                    f"SELECT company_name, inn, legal_address, director_name, director_title, "
+                    f"kpp, ogrn, bank_name, bik, account_number, corr_account, phone, email "
+                    f"FROM {S}.companies WHERE id={int(use_company_id)}"
+                )
+            else:
+                cur.execute(
+                    f"SELECT company_name, inn, legal_address, director_name, director_title, "
+                    f"kpp, ogrn, bank_name, bik, account_number, corr_account, phone, email "
+                    f"FROM {S}.companies WHERE is_default=TRUE ORDER BY id LIMIT 1"
+                )
             cs = cur.fetchone()
-            company_name = cs[0] if cs else ""
-            company_inn = cs[1] if cs else ""
+            company_name    = cs[0] if cs else ""
+            company_inn     = cs[1] if cs else ""
             company_address = cs[2] if cs else ""
-            director_name = cs[3] if cs else ""
+            director_name   = cs[3] if cs else ""
+            director_title  = cs[4] if cs else "Генеральный директор"
+            company_kpp     = cs[5] if cs else ""
+            company_ogrn    = cs[6] if cs else ""
+            company_bank    = cs[7] if cs else ""
+            company_bik     = cs[8] if cs else ""
+            company_account = cs[9] if cs else ""
+            company_corr    = cs[10] if cs else ""
+            company_phone   = cs[11] if cs else ""
+            company_email   = cs[12] if cs else ""
 
             # get template content
             content_text = ""
@@ -659,9 +683,22 @@ def handler(event: dict, context) -> dict:
                 .replace("{{budget}}", str(budget) if budget else "")
                 .replace("{{company_name}}", company_name or "")
                 .replace("{{company_inn}}", company_inn or "")
+                .replace("{{company_kpp}}", company_kpp or "")
+                .replace("{{company_ogrn}}", company_ogrn or "")
                 .replace("{{company_address}}", company_address or "")
+                .replace("{{company_bank}}", company_bank or "")
+                .replace("{{company_bik}}", company_bik or "")
+                .replace("{{company_account}}", company_account or "")
+                .replace("{{company_corr}}", company_corr or "")
+                .replace("{{company_phone}}", company_phone or "")
+                .replace("{{company_email}}", company_email or "")
                 .replace("{{director_name}}", director_name or "")
+                .replace("{{director_title}}", director_title or "")
             )
+
+            # сохраняем company_id в заказ если пришёл
+            if use_company_id and not order_company_id:
+                cur.execute(f"UPDATE {S}.orders SET company_id={int(use_company_id)} WHERE id={oid}")
 
             number = gen_contract_number(cur)
             tpl_id_sql = str(int(template_id)) if template_id else "NULL"
