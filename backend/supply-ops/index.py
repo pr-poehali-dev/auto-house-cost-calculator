@@ -365,8 +365,15 @@ def handler(event, context):
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            result = json.loads(r.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                result = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 402:
+                return resp({"error": "Кредиты DeepSeek закончились. Обратитесь к администратору для пополнения баланса."}, 402)
+            return resp({"error": f"Ошибка AI-сервиса: {e.code}"}, 502)
+        except Exception as e:
+            return resp({"error": f"Ошибка запроса к AI: {str(e)}"}, 502)
 
         content = result["choices"][0]["message"]["content"]
         try:
