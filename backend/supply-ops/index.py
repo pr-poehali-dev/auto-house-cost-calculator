@@ -101,7 +101,7 @@ def gigachat_token() -> str:
     with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
         return json.loads(r.read())["access_token"]
 
-def gigachat_complete(messages: list, max_tokens: int = 1500, temperature: float = 0.7) -> str:
+def gigachat_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
     token = gigachat_token()
     payload = {"model": "GigaChat", "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
     req = urllib.request.Request(
@@ -113,7 +113,7 @@ def gigachat_complete(messages: list, max_tokens: int = 1500, temperature: float
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+    with urllib.request.urlopen(req, timeout=50, context=ctx) as r:
         result = json.loads(r.read().decode())
     return result["choices"][0]["message"]["content"].strip()
 
@@ -126,7 +126,7 @@ def get_openai_response(messages: list, role: str) -> str:
         payload = {
             "model": "GigaChat",
             "messages": [{"role": "system", "content": system_prompt}] + messages,
-            "max_tokens": 1024,
+            "max_tokens": 700,
             "temperature": 0.7,
         }
         req = urllib.request.Request(
@@ -138,7 +138,7 @@ def get_openai_response(messages: list, role: str) -> str:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        with urllib.request.urlopen(req, timeout=50, context=ctx) as r:
             result = json.loads(r.read().decode())
         return result["choices"][0]["message"]["content"]
     except Exception as e:

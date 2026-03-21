@@ -62,7 +62,7 @@ def gigachat_analyze(text: str) -> str:
     payload = {
         "model": "GigaChat",
         "messages": messages,
-        "max_tokens": 3000,
+        "max_tokens": 1500,
         "temperature": 0.3,
     }
     req = urllib.request.Request(
