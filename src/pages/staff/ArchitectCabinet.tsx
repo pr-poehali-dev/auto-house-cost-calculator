@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
+import DocUploadManager from "@/components/project-editor/DocUploadManager";
+import type { AiItem } from "@/pages/staff/materials-types";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
@@ -1168,7 +1170,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"ai" | "info" | "files" | "spec" | "tech">("ai");
+  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech">("ai");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -1176,6 +1178,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const [spec, setSpec] = useState<Spec | null>(null);
   const [specLoading, setSpecLoading] = useState(false);
   const [showTechCards, setShowTechCards] = useState(false);
+  const [pendingDocItems, setPendingDocItems] = useState<AiItem[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadProject = useCallback(async () => {
@@ -1288,6 +1291,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     { id: "ai", label: "AI-ассистент", icon: "Sparkles" },
     { id: "info", label: "Информация", icon: "Info" },
     { id: "files", label: "Графика", icon: "Image", count: proj.files?.length },
+    { id: "docs", label: "Документация", icon: "FolderOpen", highlight: pendingDocItems ? pendingDocItems.length : 0 },
     { id: "spec", label: "Ведомость ОР", icon: "FileSpreadsheet" },
     { id: "tech", label: "Тех. карты", icon: "BookOpen" },
   ] as const;
@@ -1339,6 +1343,12 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold"
                   style={{ background: isActive ? "rgba(255,255,255,0.25)" : "rgba(255,107,26,0.3)", color: isActive ? "#fff" : "var(--neon-orange)", fontSize: 10 }}>
                   {t.count}
+                </span>
+              ) : null}
+              {"highlight" in t && t.highlight ? (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold"
+                  style={{ background: "rgba(0,255,136,0.2)", color: "var(--neon-green)", fontSize: 10 }}>
+                  {t.highlight}
                 </span>
               ) : null}
             </button>
@@ -1535,8 +1545,70 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
         </div>
       )}
 
+      {/* ── Документация ── */}
+      {tab === "docs" && (
+        <DocUploadManager
+          token={token}
+          projectId={proj.id}
+          onImport={(items) => {
+            setPendingDocItems(items);
+            setTab("spec");
+          }}
+        />
+      )}
+
       {/* ── Ведомость ОР ── */}
       {tab === "spec" && (
+        <div>
+          {/* Баннер импорта из документации */}
+          {pendingDocItems && pendingDocItems.length > 0 && (
+            <div className="mb-4 p-4 rounded-xl flex items-start gap-3"
+              style={{ background: "rgba(0,212,255,0.08)", border: "1px solid rgba(0,212,255,0.25)" }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(0,212,255,0.15)" }}>
+                <Icon name="Sparkles" size={18} style={{ color: "var(--neon-cyan)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-white text-sm mb-0.5">
+                  Готово к импорту: {pendingDocItems.length} позиций из документа
+                </div>
+                <div className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  AI извлёк позиции постранично. Нажмите «Добавить в ведомость».
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={async () => {
+                    let specId = spec?.id;
+                    if (!specId) {
+                      const res = await apiFetch(`${PROJECTS_URL}?action=spec_create`, {
+                        method: "POST", body: JSON.stringify({ project_id: proj.id, items: [] }),
+                      }, token);
+                      if (res.ok) { await loadSpec(); specId = res.spec_id; }
+                    }
+                    if (!specId && spec) specId = spec.id;
+                    if (!specId) return;
+                    for (const item of pendingDocItems) {
+                      await apiFetch(`${PROJECTS_URL}?action=spec_add_item`, {
+                        method: "POST",
+                        body: JSON.stringify({ spec_id: specId, section: item.section || "Прочее", name: item.name, unit: item.unit || "шт", qty: item.qty || 0, price_per_unit: item.price_per_unit || 0, note: item.note || "" }),
+                      }, token);
+                    }
+                    setPendingDocItems(null);
+                    loadSpec();
+                  }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                    style={{ background: "var(--neon-cyan)", color: "#000" }}>
+                    <Icon name="Download" size={13} />
+                    Добавить в ведомость
+                  </button>
+                  <button onClick={() => setPendingDocItems(null)}
+                    className="px-3 py-1.5 rounded-lg text-xs"
+                    style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         <div className="rounded-2xl p-5" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -1563,6 +1635,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
               Нажмите «Создать ведомость» чтобы начать
             </div>
           )}
+        </div>
         </div>
       )}
 
