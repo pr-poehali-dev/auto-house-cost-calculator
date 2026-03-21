@@ -61,21 +61,23 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
 
   const upload = async (file: File) => {
     setUploading(true);
-    setUploadProgress("Загружаю файл в хранилище...");
+    setUploadProgress("Читаю файл...");
     try {
-      const pre = await apiFetch(`${AI_URL}?action=presigned_spec`, {
-        method: "POST",
-        body: JSON.stringify({ file_name: file.name, project_id: projectId }),
-      }, token);
-      if (!pre.presigned_url) { setUploading(false); setUploadProgress(""); return; }
+      // Читаем файл как base64
+      const arrayBuf = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 1024) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 1024));
+      }
+      const file_b64 = btoa(binary);
 
-      await fetch(pre.presigned_url, { method: "PUT", body: file });
-      setUploadProgress("AI классифицирует документ и анализирует постранично...");
+      setUploadProgress("AI классифицирует и анализирует документ постранично...");
 
-      const r = await apiFetch(`${AI_URL}?action=upload_spec`, {
+      const r = await apiFetch(`${AI_URL}?action=upload_doc`, {
         method: "POST",
         body: JSON.stringify({
-          s3_key: pre.s3_key,
+          file_b64,
           file_name: file.name,
           project_id: projectId,
           spec_id: specId,
