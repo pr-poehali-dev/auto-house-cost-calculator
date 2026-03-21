@@ -194,22 +194,31 @@ def extract_text_from_pdf_native(file_data: bytes) -> str:
         print(f"[spec-ai] pdfminer: {e}")
     return ""
 
-def ocr_pdf_via_ocrspace(file_data: bytes) -> str:
-    """OCR всего PDF через OCR.space (для сканированных документов)"""
+def extract_jpegs_from_pdf(file_data: bytes, max_images: int = 5) -> list:
+    """Извлекает JPEG-изображения из PDF (для скан-документов)"""
+    images = []
+    pos = 0
+    while pos < len(file_data) - 4 and len(images) < max_images:
+        idx = file_data.find(b'\xff\xd8\xff', pos)
+        if idx == -1: break
+        end = file_data.find(b'\xff\xd9', idx + 2)
+        if end != -1 and end - idx > 10000:  # минимум 10КБ — реальная страница
+            images.append(file_data[idx:end+2])
+        pos = idx + 3
+    return images
+
+def ocr_image_via_ocrspace(img_bytes: bytes) -> str:
+    """OCR одного изображения через OCR.space"""
     ocr_key = os.environ.get("OCR_SPACE_API_KEY", "")
-    if not ocr_key:
-        print("[spec-ai] OCR_SPACE_API_KEY не настроен")
-        return ""
+    if not ocr_key: return ""
     try:
-        # OCR.space принимает PDF напрямую как base64
-        b64 = base64.b64encode(file_data).decode()
+        b64 = base64.b64encode(img_bytes).decode()
         payload = urllib.parse.urlencode({
-            "base64Image": f"data:application/pdf;base64,{b64}",
+            "base64Image": f"data:image/jpeg;base64,{b64}",
             "language": "rus",
             "isOverlayRequired": "false",
             "OCREngine": "2",
             "scale": "true",
-            "isSearchablePdfHideTextLayer": "false",
         }).encode()
         req = urllib.request.Request(
             "https://api.ocr.space/parse/image",
@@ -220,13 +229,61 @@ def ocr_pdf_via_ocrspace(file_data: bytes) -> str:
         with urllib.request.urlopen(req, timeout=25) as r:
             result = json.loads(r.read())
         parsed = result.get("ParsedResults", [])
-        texts = [p.get("ParsedText", "") for p in parsed if p.get("ParsedText")]
-        combined = "\n".join(texts)
-        print(f"[spec-ai] OCR.space extracted {len(combined)} chars from {len(parsed)} pages")
-        return combined
+        return parsed[0].get("ParsedText", "") if parsed else ""
     except Exception as e:
-        print(f"[spec-ai] ocr_pdf error: {e}")
+        print(f"[spec-ai] ocr_image error: {e}")
         return ""
+
+def ocr_pdf_via_ocrspace(file_data: bytes) -> str:
+    """OCR PDF-скана: извлекаем JPEG страницы и распознаём по одной"""
+    ocr_key = os.environ.get("OCR_SPACE_API_KEY", "")
+    if not ocr_key:
+        print("[spec-ai] OCR_SPACE_API_KEY не настроен")
+        return ""
+
+    # Если файл маленький (<4МБ) — шлём целиком как PDF
+    if len(file_data) < 4 * 1024 * 1024:
+        try:
+            b64 = base64.b64encode(file_data).decode()
+            payload = urllib.parse.urlencode({
+                "base64Image": f"data:application/pdf;base64,{b64}",
+                "language": "rus",
+                "isOverlayRequired": "false",
+                "OCREngine": "2",
+                "scale": "true",
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.ocr.space/parse/image",
+                data=payload,
+                headers={"apikey": ocr_key, "Content-Type": "application/x-www-form-urlencoded"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=25) as r:
+                result = json.loads(r.read())
+            parsed = result.get("ParsedResults", [])
+            texts = [p.get("ParsedText", "") for p in parsed if p.get("ParsedText")]
+            combined = "\n".join(texts)
+            print(f"[spec-ai] OCR.space (pdf) extracted {len(combined)} chars from {len(parsed)} pages")
+            return combined
+        except Exception as e:
+            print(f"[spec-ai] ocr_pdf error: {e}")
+
+    # Большой файл — извлекаем JPEG страницы и OCR по одной (до 8 страниц)
+    print(f"[spec-ai] Large PDF ({len(file_data)//1024}КБ), extracting JPEGs...")
+    images = extract_jpegs_from_pdf(file_data, max_images=8)
+    if not images:
+        print("[spec-ai] No JPEG pages found in PDF")
+        return ""
+    print(f"[spec-ai] Found {len(images)} JPEG pages, running OCR...")
+    texts = []
+    for i, img_bytes in enumerate(images):
+        text = ocr_image_via_ocrspace(img_bytes)
+        if text.strip():
+            texts.append(f"--- Страница {i+1} ---\n{text}")
+        print(f"[spec-ai] OCR page {i+1}: {len(text)} chars")
+    combined = "\n".join(texts)
+    print(f"[spec-ai] Total OCR: {len(combined)} chars from {len(images)} pages")
+    return combined
 
 def extract_text_from_file(file_data: bytes, file_name: str) -> tuple:
     """Возвращает (text, is_scan) — text для всех типов, is_scan=True если скан"""
@@ -404,7 +461,7 @@ def handler(event: dict, context) -> dict:
             "doc_category": doc_info.get("category", "other"),
             "doc_category_label": DOC_CATEGORIES.get(doc_info.get("category","other"), "Прочее"),
             "doc_summary": doc_info.get("summary", ""),
-            "pages_count": len(pages),
+            "pages_count": pages_count,
             "s3_key": final_key,
         })
 
