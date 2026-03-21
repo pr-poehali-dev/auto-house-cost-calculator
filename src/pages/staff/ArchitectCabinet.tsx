@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
 import NormDocuments from "@/components/project-editor/NormDocuments";
+import TzAnalyzer from "@/pages/staff/TzAnalyzer";
 import type { AiItem } from "@/pages/staff/materials-types";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
@@ -815,6 +816,7 @@ function TechTab({ proj, token, onOpenLibrary }: { proj: Project; token: string;
           </button>
         </div>
       )}
+
     </div>
   );
 }
@@ -1682,6 +1684,7 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [showTzAnalyzer, setShowTzAnalyzer] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1737,12 +1740,20 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
           <h2 className="font-display text-2xl font-bold text-white">Мои проекты</h2>
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{user.full_name} · {projects.length} проектов</p>
         </div>
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-          style={{ background: "var(--neon-cyan)", color: "#0A0D14", boxShadow: "0 0 20px rgba(0,212,255,0.3)" }}>
-          <Icon name="Plus" size={15} />
-          Новый проект
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowTzAnalyzer(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+            <Icon name="FileSearch" size={15} />
+            Анализ ТЗ
+          </button>
+          <button onClick={openNew}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{ background: "var(--neon-cyan)", color: "#0A0D14", boxShadow: "0 0 20px rgba(0,212,255,0.3)" }}>
+            <Icon name="Plus" size={15} />
+            Новый проект
+          </button>
+        </div>
       </div>
 
       {/* Form */}
@@ -1929,6 +1940,8 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
           })}
         </div>
       )}
+
+      {showTzAnalyzer && <TzAnalyzer onClose={() => setShowTzAnalyzer(false)} />}
     </div>
   );
 }
