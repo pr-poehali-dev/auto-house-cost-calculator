@@ -41,8 +41,10 @@ interface UploadedDoc {
 interface PageData {
   page: number;
   text_preview: string;
+  text?: string;
   items: AiItem[];
   items_count: number;
+  analyzed?: boolean;
 }
 
 interface DocUploadManagerProps {
@@ -135,12 +137,12 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
   };
 
   const analyzePage = async (pageNum: number) => {
-    if (!activeDoc || !activeS3Key) return;
+    if (!activeDoc) return;
     setAnalyzingPage(pageNum);
     try {
       const r = await apiFetch(`${AI_URL}?action=analyze_page`, {
         method: "POST",
-        body: JSON.stringify({ upload_id: activeDoc.id, page: pageNum, s3_key: activeS3Key }),
+        body: JSON.stringify({ upload_id: activeDoc.id, page: pageNum }),
       }, token);
       if (r.ok) {
         const pageData: PageData = {
@@ -181,17 +183,19 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
     setActiveDoc(doc);
     setCurrentPage(1);
     setPages([]);
-    // Определяем s3_key из file_url
+    setSelectedItems(new Set());
     const match = doc.file_url.match(/\/bucket\/(.+)$/);
-    const key = match ? match[1] : "";
-    setActiveS3Key(key);
+    setActiveS3Key(match ? match[1] : "");
     setTotalPages(doc.page_count || 0);
-    // Загружаем уже проанализированные страницы
+    // Загружаем страницы из БД (уже содержат текст и возможно items)
     const r = await apiFetch(`${AI_URL}?action=get&upload_id=${doc.id}`, {}, token);
     if (r.upload?.pages?.length) {
       setPages(r.upload.pages);
+      setTotalPages(r.upload.pages.length);
       const allKeys = new Set<string>();
-      r.upload.pages.forEach((p: PageData) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
+      r.upload.pages.forEach((p: PageData) => {
+        if (p.items?.length) p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`));
+      });
       setSelectedItems(allKeys);
     }
   };
@@ -284,7 +288,7 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
                 const isAnalyzing = analyzingPage === p;
                 const isActive = currentPage === p;
                 return (
-                  <button key={p} onClick={() => { setCurrentPage(p); if (!pd) analyzePage(p); }}
+                  <button key={p} onClick={() => { setCurrentPage(p); if (!pd || !pd.analyzed) analyzePage(p); }}
                     className="w-full text-left p-2.5 rounded-xl transition-all"
                     style={{
                       background: isActive ? "rgba(0,212,255,0.12)" : "rgba(255,255,255,0.04)",

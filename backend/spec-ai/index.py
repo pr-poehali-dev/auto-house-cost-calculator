@@ -167,61 +167,79 @@ def classify_document(text: str) -> dict:
         print(f"[spec-ai] classify error: {e}")
     return {"category": "other", "summary": ""}
 
-def extract_text_from_pdf(file_data: bytes) -> str:
-    """Извлекает текст из PDF — pdfminer.six (основной), regex (fallback)"""
-    # Метод 1: pdfminer.six — работает с большинством текстовых PDF
+def extract_text_from_pdf_native(file_data: bytes) -> str:
+    """Извлекает встроенный текст из PDF через pdfminer (только для текстовых PDF, быстро)"""
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract
         from pdfminer.layout import LAParams
-        import io
-        laparams = LAParams(line_margin=0.5, word_margin=0.1)
-        text = pdfminer_extract(io.BytesIO(file_data), laparams=laparams)
+        import io, signal
+
+        def _timeout(signum, frame):
+            raise TimeoutError("pdfminer timeout")
+
+        signal.signal(signal.SIGALRM, _timeout)
+        signal.alarm(8)  # 8 секунд максимум
+        try:
+            laparams = LAParams(line_margin=0.5, word_margin=0.1)
+            text = pdfminer_extract(io.BytesIO(file_data), laparams=laparams)
+        finally:
+            signal.alarm(0)
+
         if text and len(text.strip()) > 50:
             lines = [l.strip() for l in text.split("\n") if l.strip()]
             result = "\n".join(lines)
             print(f"[spec-ai] pdfminer extracted {len(result)} chars")
             return result
     except Exception as e:
-        print(f"[spec-ai] pdfminer error: {e}")
+        print(f"[spec-ai] pdfminer: {e}")
+    return ""
 
-    # Метод 2: regex fallback
+def ocr_pdf_via_ocrspace(file_data: bytes) -> str:
+    """OCR всего PDF через OCR.space (для сканированных документов)"""
+    ocr_key = os.environ.get("OCR_SPACE_API_KEY", "")
+    if not ocr_key:
+        print("[spec-ai] OCR_SPACE_API_KEY не настроен")
+        return ""
     try:
-        text = file_data.decode("latin-1", errors="ignore")
-        chunks = re.findall(r'\(([^)]{1,200})\)', text)
-        readable = []
-        for chunk in chunks:
-            cleaned = chunk.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ").strip()
-            if len(cleaned) > 2 and any(c.isalpha() for c in cleaned):
-                readable.append(cleaned)
-        result = " | ".join(readable[:1200])
-        print(f"[spec-ai] regex fallback extracted {len(result)} chars")
-        return result
-    except:
+        # OCR.space принимает PDF напрямую как base64
+        b64 = base64.b64encode(file_data).decode()
+        payload = urllib.parse.urlencode({
+            "base64Image": f"data:application/pdf;base64,{b64}",
+            "language": "rus",
+            "isOverlayRequired": "false",
+            "OCREngine": "2",
+            "scale": "true",
+            "isSearchablePdfHideTextLayer": "false",
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.ocr.space/parse/image",
+            data=payload,
+            headers={"apikey": ocr_key, "Content-Type": "application/x-www-form-urlencoded"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=25) as r:
+            result = json.loads(r.read())
+        parsed = result.get("ParsedResults", [])
+        texts = [p.get("ParsedText", "") for p in parsed if p.get("ParsedText")]
+        combined = "\n".join(texts)
+        print(f"[spec-ai] OCR.space extracted {len(combined)} chars from {len(parsed)} pages")
+        return combined
+    except Exception as e:
+        print(f"[spec-ai] ocr_pdf error: {e}")
         return ""
 
-def extract_images_from_pdf(file_data: bytes) -> list:
-    try:
-        images = []
-        pos = 0
-        while pos < len(file_data) - 4:
-            idx = file_data.find(b'\xff\xd8\xff', pos)
-            if idx == -1: break
-            end = file_data.find(b'\xff\xd9', idx + 2)
-            if end != -1 and end - idx > 5000:
-                images.append(base64.b64encode(file_data[idx:end+2]).decode())
-                if len(images) >= 4: break
-            pos = idx + 3
-        return images
-    except:
-        return []
-
 def extract_text_from_file(file_data: bytes, file_name: str) -> tuple:
+    """Возвращает (text, is_scan) — text для всех типов, is_scan=True если скан"""
     ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
     if ext == "pdf":
-        text = extract_text_from_pdf(file_data)
-        if len(text) < 200:
-            return ("", extract_images_from_pdf(file_data))
-        return (text, [])
+        # Сначала пробуем нативный текст (быстро)
+        text = extract_text_from_pdf_native(file_data)
+        if len(text) >= 200:
+            return (text, [])
+        # Если текста нет — это скан, пробуем OCR
+        print(f"[spec-ai] PDF has no native text, trying OCR...")
+        ocr_text = ocr_pdf_via_ocrspace(file_data)
+        return (ocr_text, [])
     elif ext in ("xlsx", "xls", "csv"):
         if ext == "csv":
             try: return (file_data.decode("utf-8", errors="ignore")[:12000], [])
@@ -339,29 +357,31 @@ def handler(event: dict, context) -> dict:
 
         url = cdn_url(final_key)
 
-        # Извлекаем текст и сразу классифицируем
+        # Извлекаем текст (нативный или OCR для сканов)
         print(f"[spec-ai] uploaded file={file_name} size={len(file_bytes)} key={final_key}")
-        extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name)
-        print(f"[spec-ai] extracted text={len(extracted_text)} images={len(images_b64)}")
-        pages = split_text_into_pages(extracted_text) if extracted_text else []
+        extracted_text, _ = extract_text_from_file(file_bytes, file_name)
+        print(f"[spec-ai] extracted text={len(extracted_text)}")
+        pages_text = split_text_into_pages(extracted_text) if extracted_text else []
 
+        # Классифицируем документ
         doc_info = {"category": "other", "summary": ""}
         if extracted_text and os.environ.get("GIGACHAT_AUTH_KEY"):
             try: doc_info = classify_document(extracted_text)
             except Exception as e: print(f"[spec-ai] classify: {e}")
-        elif images_b64:
-            ocr_txt = ocr_images_to_text(images_b64[:1])
-            if ocr_txt and os.environ.get("GIGACHAT_AUTH_KEY"):
-                try: doc_info = classify_document(ocr_txt)
-                except: pass
-            pages = [ocr_txt] if ocr_txt else []
 
-        # Сохраняем в БД — пустые pages_data, анализ будет по запросу
+        # Сохраняем страницы текста в pages_data (без items — анализ будет по запросу)
+        pages_data_init = [
+            {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False}
+            for i, p in enumerate(pages_text)
+        ]
+
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO {S}.spec_uploads (project_id,file_name,file_url,status,uploaded_by,doc_category,page_count) "
-            f"VALUES (%s,%s,%s,'uploaded',%s,%s,%s) RETURNING id",
-            (project_id, file_name, url, staff["id"], doc_info.get("category","other"), len(pages)))
+            f"INSERT INTO {S}.spec_uploads (project_id,file_name,file_url,status,uploaded_by,doc_category,page_count,pages_data) "
+            f"VALUES (%s,%s,%s,'uploaded',%s,%s,%s,%s) RETURNING id",
+            (project_id, file_name, url, staff["id"],
+             doc_info.get("category","other"), len(pages_text),
+             json.dumps(pages_data_init, ensure_ascii=False)))
         db_upload_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
 
@@ -378,56 +398,49 @@ def handler(event: dict, context) -> dict:
             "s3_key": final_key,
         })
 
-    # ── ШАГ 2: Анализ одной страницы (вызывается фронтом в цикле) ────────────
+    # ── ШАГ 2: Анализ одной страницы — текст берём из pages_data в БД ─────────
     if method == "POST" and action == "analyze_page":
         upload_id = body.get("upload_id")
         page_num = int(body.get("page", 1))
-        s3_key = body.get("s3_key", "")
 
-        if not upload_id or not s3_key:
-            conn.close(); return resp({"error": "upload_id и s3_key обязательны"}, 400)
+        if not upload_id:
+            conn.close(); return resp({"error": "upload_id обязателен"}, 400)
 
-        try:
-            s3c = s3()
-            obj = s3c.get_object(Bucket="files", Key=s3_key)
-            file_bytes = obj["Body"].read()
-        except Exception as e:
-            conn.close(); return resp({"error": f"Файл не найден: {e}"}, 404)
-
-        file_name_key = s3_key.split("/")[-1]
-        extracted_text, images_b64 = extract_text_from_file(file_bytes, file_name_key)
-
-        items = []
-        page_text = ""
-
-        if extracted_text:
-            pages = split_text_into_pages(extracted_text)
-            if page_num <= len(pages):
-                page_text = pages[page_num - 1]
-                if page_text.strip() and os.environ.get("GIGACHAT_AUTH_KEY"):
-                    cur = conn.cursor()
-                    cur.execute(f"SELECT name,unit,price_per_unit,category FROM {S}.materials WHERE is_active=TRUE ORDER BY category,name LIMIT 100")
-                    mats = cur.fetchall()
-                    cur.close()
-                    mat_ctx = "\n".join([f"{r[3]}|{r[0]}|{r[1]}|{r[2]}₽" for r in mats])
-                    try:
-                        prompt = f"{SPEC_PROMPT}\n\nМатериалы:\n{mat_ctx}\n\nСтраница {page_num}:\n{page_text}"
-                        content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
-                        items = _parse_items(content)
-                    except Exception as e:
-                        print(f"[spec-ai] page {page_num} error: {e}")
-
-        # Сохраняем результат страницы в pages_data
         cur = conn.cursor()
         cur.execute(f"SELECT pages_data FROM {S}.spec_uploads WHERE id=%s", (upload_id,))
         row = cur.fetchone()
-        pages_data = row[0] if row and row[0] else []
+        if not row:
+            cur.close(); conn.close(); return resp({"error": "Загрузка не найдена"}, 404)
 
-        # Обновляем или добавляем страницу
-        page_entry = {"page": page_num, "text_preview": page_text[:400], "items": items, "items_count": len(items)}
-        pages_data = [p for p in pages_data if p.get("page") != page_num]
-        pages_data.append(page_entry)
-        pages_data.sort(key=lambda x: x.get("page", 0))
+        pages_data = row[0] or []
+        page_entry = next((p for p in pages_data if p.get("page") == page_num), None)
+
+        items = []
+        page_text = page_entry.get("text", page_entry.get("text_preview", "")) if page_entry else ""
+
+        if page_text.strip() and os.environ.get("GIGACHAT_AUTH_KEY"):
+            cur.execute(f"SELECT name,unit,price_per_unit,category FROM {S}.materials WHERE is_active=TRUE ORDER BY category,name LIMIT 100")
+            mats = cur.fetchall()
+            mat_ctx = "\n".join([f"{r[3]}|{r[0]}|{r[1]}|{r[2]}₽" for r in mats])
+            try:
+                prompt = f"{SPEC_PROMPT}\n\nМатериалы:\n{mat_ctx}\n\nСтраница {page_num}:\n{page_text[:6000]}"
+                content = gigachat_chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
+                items = _parse_items(content)
+                print(f"[spec-ai] page {page_num}: {len(items)} items")
+            except Exception as e:
+                print(f"[spec-ai] page {page_num} error: {e}")
+
+        # Обновляем pages_data — сохраняем items, помечаем analyzed=True
+        updated = []
+        for p in pages_data:
+            if p.get("page") == page_num:
+                updated.append({**p, "items": items, "items_count": len(items), "analyzed": True})
+            else:
+                updated.append(p)
+        if not any(p.get("page") == page_num for p in pages_data):
+            updated.append({"page": page_num, "text_preview": page_text[:400], "items": items, "items_count": len(items), "analyzed": True})
+        updated.sort(key=lambda x: x.get("page", 0))
+        pages_data = updated
 
         cur.execute(
             f"UPDATE {S}.spec_uploads SET pages_data=%s, status='processing' WHERE id=%s",
