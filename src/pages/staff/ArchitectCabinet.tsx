@@ -5,6 +5,7 @@ import DocUploadManager from "@/components/project-editor/DocUploadManager";
 import NormDocuments from "@/components/project-editor/NormDocuments";
 import GeometryCalc from "@/components/project-editor/GeometryCalc";
 import BimImporter from "@/components/project-editor/BimImporter";
+import PriceMatch from "@/components/project-editor/PriceMatch";
 import TzAnalyzer from "@/pages/staff/TzAnalyzer";
 import type { AiItem } from "@/pages/staff/materials-types";
 
@@ -437,6 +438,7 @@ function SpecEditor({ spec, token, onUpdate }: { spec: Spec; token: string; onUp
   const [addForm, setAddForm] = useState({ section: "", name: "", unit: "м²", qty: 0, price_per_unit: 0, note: "" });
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showPriceMatch, setShowPriceMatch] = useState(false);
 
   useEffect(() => {
     if (!spec.items) {
@@ -496,13 +498,68 @@ function SpecEditor({ spec, token, onUpdate }: { spec: Spec; token: string; onUp
 
   if (loading) return <div className="py-8 text-center text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>;
 
+  // Применяем подобранные цены поставщиков к позициям спецификации
+  const handlePriceApply = async (enriched: { name: string; price_per_unit: number }[]) => {
+    const priceMap = Object.fromEntries(enriched.map(e => [e.name, e.price_per_unit]));
+    const updated = items.map(it => {
+      const price = priceMap[it.name];
+      return price && price > 0 ? { ...it, price_per_unit: price, total_price: it.qty * price } : it;
+    });
+    setItems(updated);
+    setShowPriceMatch(false);
+    // Сохраняем обновлённые цены в БД
+    for (const it of updated) {
+      if (priceMap[it.name] && priceMap[it.name] > 0) {
+        await apiFetch(`${PROJECTS_URL}?action=spec_update_item`, {
+          method: "POST",
+          body: JSON.stringify({ item_id: it.id, price_per_unit: it.price_per_unit, total_price: it.total_price }),
+        }, token);
+      }
+    }
+    onUpdate();
+  };
+
   return (
     <div>
+      {/* Панель подбора цен */}
+      {showPriceMatch && items.length > 0 && (
+        <div className="mb-5 rounded-2xl p-5" style={{ background: "rgba(255,107,26,0.04)", border: "1px solid rgba(255,107,26,0.2)" }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Icon name="Zap" size={16} style={{ color: "var(--neon-orange)" }} />
+              <span className="font-semibold text-white text-sm">Подбор цен поставщиков</span>
+            </div>
+            <button onClick={() => setShowPriceMatch(false)} className="text-xs px-3 py-1 rounded-lg hover:bg-white/10 transition-colors" style={{ color: "rgba(255,255,255,0.4)" }}>
+              Закрыть
+            </button>
+          </div>
+          <PriceMatch
+            token={token}
+            items={items.map(it => ({ section: it.section, name: it.name, unit: it.unit, qty: it.qty, price_per_unit: it.price_per_unit, note: it.note }))}
+            onApply={handlePriceApply}
+          />
+        </div>
+      )}
+
       {/* Итого */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>{items.length} позиций</div>
-        <div className="font-display font-bold text-lg" style={{ color: "var(--neon-green)" }}>
-          Итого: {fmt(total)} ₽
+        <div className="flex items-center gap-3">
+          {items.length > 0 && (
+            <button onClick={() => setShowPriceMatch(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{
+                background: showPriceMatch ? "rgba(255,107,26,0.15)" : "rgba(255,255,255,0.05)",
+                color: showPriceMatch ? "var(--neon-orange)" : "rgba(255,255,255,0.5)",
+                border: `1px solid ${showPriceMatch ? "rgba(255,107,26,0.3)" : "rgba(255,255,255,0.1)"}`,
+              }}>
+              <Icon name="Zap" size={12} />
+              Подобрать цены
+            </button>
+          )}
+          <div className="font-display font-bold text-lg" style={{ color: "var(--neon-green)" }}>
+            Итого: {fmt(total)} ₽
+          </div>
         </div>
       </div>
 

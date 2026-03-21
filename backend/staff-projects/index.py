@@ -332,6 +332,60 @@ def handler(event: dict, context) -> dict:
         conn.commit(); cur.close(); conn.close()
         return resp({"ok":True})
 
+    # ── Подбор цен поставщиков к позициям ВОР ────────────────────────────────
+
+    if action == "price_match":
+        names = body.get("names", [])  # список строк — названия материалов из ВОР
+        if not names: conn.close(); return resp({"error":"names обязателен"}, 400)
+
+        cur = conn.cursor()
+        # Загружаем весь прайс-лист (600 позиций — не дорого)
+        cur.execute(f"""
+            SELECT spl.material_name, spl.unit, spl.price_per_unit, s.company_name, s.id as supplier_id
+            FROM {S}.supplier_price_list spl
+            JOIN {S}.suppliers s ON s.id = spl.supplier_id
+            WHERE spl.price_per_unit > 0
+            ORDER BY spl.price_per_unit
+        """)
+        price_rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        # Нечёткий поиск: токенизируем оба названия и считаем совпадения
+        def tokenize(s):
+            return set(re.sub(r"[^а-яёa-z0-9]", " ", s.lower()).split())
+
+        def match_score(query_tokens, candidate):
+            cand_tokens = tokenize(candidate)
+            if not query_tokens or not cand_tokens: return 0
+            common = query_tokens & cand_tokens
+            # Взвешиваем: длинные слова важнее
+            score = sum(len(w) for w in common)
+            # Штраф за лишние слова в кандидате
+            score -= len(cand_tokens - query_tokens) * 0.3
+            return score
+
+        results = {}
+        for name in names[:200]:  # не более 200 позиций за раз
+            query_tokens = tokenize(name)
+            best_score = 0
+            best_match = None
+            for row in price_rows:
+                cand_name, cand_unit, cand_price, company, sup_id = row
+                score = match_score(query_tokens, cand_name)
+                if score > best_score:
+                    best_score = score
+                    best_match = {
+                        "matched_name": cand_name,
+                        "unit": cand_unit,
+                        "price_per_unit": float(cand_price),
+                        "company": company,
+                        "supplier_id": sup_id,
+                        "score": round(score, 1),
+                    }
+            results[name] = best_match if best_score >= 3 else None
+
+        return resp({"ok": True, "matches": results, "total": len(names), "found": sum(1 for v in results.values() if v)})
+
     # ── Файлы проекта (S3) ────────────────────────────────────────────────────
 
     if action == "upload_file":
