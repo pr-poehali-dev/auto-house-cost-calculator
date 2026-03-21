@@ -2,13 +2,28 @@ import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { AI_URL, apiFetch, AiItem } from "@/pages/staff/materials-types";
 
-export const DOC_CATEGORIES: Record<string, { label: string; icon: string; color: string; desc: string }> = {
-  specification: { label: "Спецификация", icon: "📋", color: "#00D4FF", desc: "Спецификации материалов и изделий" },
-  work_statement: { label: "Ведомость работ", icon: "📊", color: "#00FF88", desc: "Ведомости объёмов работ" },
-  estimate: { label: "Смета", icon: "💰", color: "#FBBF24", desc: "Сметы и расчёты стоимости" },
-  explanatory_note: { label: "Пояснительная", icon: "📝", color: "#A855F7", desc: "Пояснительные записки" },
-  drawing: { label: "Чертёж", icon: "📐", color: "#FF6B1A", desc: "Чертежи и схемы" },
-  other: { label: "Прочее", icon: "📎", color: "rgba(255,255,255,0.4)", desc: "Прочая документация" },
+// Разделы проектной документации по ПП РФ №87
+export const DOC_CATEGORIES: Record<string, { label: string; icon: string; color: string; group: string }> = {
+  // Текстовые разделы
+  explanatory_note:  { label: "Пояснительная записка (ПЗ)", icon: "📝", color: "#A855F7", group: "text" },
+  construction_org:  { label: "Проект организации строительства (ПОС)", icon: "🏗️", color: "#6366F1", group: "text" },
+  demolition_org:    { label: "Проект организации сноса (ПОД)", icon: "🔨", color: "#8B5CF6", group: "text" },
+  environment:       { label: "Охрана окружающей среды", icon: "🌿", color: "#10B981", group: "text" },
+  fire_safety:       { label: "Пожарная безопасность", icon: "🔥", color: "#EF4444", group: "text" },
+  accessibility:     { label: "Доступность МГН", icon: "♿", color: "#F59E0B", group: "text" },
+  energy_efficiency: { label: "Энергоэффективность", icon: "⚡", color: "#FBBF24", group: "text" },
+  smeta:             { label: "Сводный сметный расчёт", icon: "💼", color: "#F97316", group: "text" },
+  // Графические разделы
+  scheme_layout:     { label: "Схема планировочной организации (СПОЗУ)", icon: "🗺️", color: "#0EA5E9", group: "graphic" },
+  architecture:      { label: "Архитектурные решения (АР)", icon: "🏛️", color: "#06B6D4", group: "graphic" },
+  construction:      { label: "Конструктивные решения (КР/КЖ/КМ)", icon: "⚙️", color: "#3B82F6", group: "graphic" },
+  engineering:       { label: "Инженерные системы (ИОС/ВК/ОВ/ЭО)", icon: "🔧", color: "#2563EB", group: "graphic" },
+  drawing:           { label: "Чертёж / схема", icon: "📐", color: "#FF6B1A", group: "graphic" },
+  // Аналитические
+  specification:     { label: "Спецификация материалов", icon: "📋", color: "#00D4FF", group: "analytic" },
+  work_statement:    { label: "Ведомость объёмов работ (ВОР)", icon: "📊", color: "#00FF88", group: "analytic" },
+  estimate:          { label: "Смета / расчёт стоимости", icon: "💰", color: "#FBBF24", group: "analytic" },
+  other:             { label: "Прочее", icon: "📎", color: "rgba(255,255,255,0.4)", group: "other" },
 };
 
 interface UploadedDoc {
@@ -20,8 +35,7 @@ interface UploadedDoc {
   doc_category_label: string;
   page_count: number | null;
   created_at: string;
-  by: string;
-  error?: string;
+  s3_key?: string;
 }
 
 interface PageData {
@@ -34,21 +48,23 @@ interface PageData {
 interface DocUploadManagerProps {
   token: string;
   projectId?: number;
-  specId?: number;
   onImport: (items: AiItem[], category: string) => void;
 }
 
-export default function DocUploadManager({ token, projectId, specId, onImport }: DocUploadManagerProps) {
+const CHUNK_SIZE = 400 * 1024; // 400 КБ
+
+export default function DocUploadManager({ token, projectId, onImport }: DocUploadManagerProps) {
   const [uploads, setUploads] = useState<UploadedDoc[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [activeDoc, setActiveDoc] = useState<UploadedDoc | null>(null);
+  const [activeS3Key, setActiveS3Key] = useState("");
   const [pages, setPages] = useState<PageData[]>([]);
+  const [totalPages, setTotalPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [loadingPages, setLoadingPages] = useState(false);
+  const [analyzingPage, setAnalyzingPage] = useState<number | null>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [filterCategory, setFilterCategory] = useState<string>("all");
-  const [analyzingPages, setAnalyzingPages] = useState(false);
+  const [filterCategory, setFilterCategory] = useState("all");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadUploads(); }, [projectId]);
@@ -61,12 +77,8 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
 
   const upload = async (file: File) => {
     setUploading(true);
-    setUploadProgress("Загружаю файл...");
-
-    const CHUNK_SIZE = 512 * 1024;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     let uploadSessId = "";
-    let finalR: Record<string, unknown> | null = null;
 
     try {
       for (let i = 0; i < totalChunks; i++) {
@@ -74,56 +86,47 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
         const arrayBuf = await slice.arrayBuffer();
         const bytes = new Uint8Array(arrayBuf);
         let binary = "";
-        for (let j = 0; j < bytes.length; j += 1024) {
+        for (let j = 0; j < bytes.length; j += 1024)
           binary += String.fromCharCode(...bytes.subarray(j, j + 1024));
-        }
         const chunk_b64 = btoa(binary);
-        const pct = Math.round(((i + 1) / totalChunks) * 80);
+
+        const pct = Math.round(((i + 1) / totalChunks) * 100);
         setUploadProgress(`Загружаю файл... ${pct}%`);
 
         const r = await apiFetch(`${AI_URL}?action=upload_doc_chunk`, {
           method: "POST",
           body: JSON.stringify({
-            chunk: chunk_b64,
-            chunk_index: i,
-            total_chunks: totalChunks,
-            upload_id: uploadSessId,
-            file_name: file.name,
-            project_id: projectId,
-            spec_id: specId,
+            chunk: chunk_b64, chunk_index: i, total_chunks: totalChunks,
+            upload_id: uploadSessId, file_name: file.name, project_id: projectId,
           }),
         }, token);
 
-        if (!r.ok) { setUploadProgress(""); setUploading(false); return; }
+        if (!r.ok) { setUploadProgress("Ошибка загрузки"); setUploading(false); return; }
         if (r.upload_id && !uploadSessId) uploadSessId = String(r.upload_id);
-        if (r.done) { finalR = r; break; }
-      }
+        if (!r.done) continue;
 
-      setUploadProgress("");
-      setUploading(false);
-      await loadUploads();
+        // Файл загружен и классифицирован
+        setUploadProgress("");
+        setUploading(false);
+        await loadUploads();
 
-      if (finalR && finalR.upload_id) {
         const newDoc: UploadedDoc = {
-          id: Number(finalR.upload_id),
+          id: Number(r.upload_id),
           file_name: file.name,
-          file_url: String(finalR.file_url || ""),
-          status: String(finalR.status || "done"),
-          doc_category: String(finalR.doc_category || "other"),
-          doc_category_label: String(finalR.doc_category_label || "Прочее"),
-          page_count: finalR.pages_count ? Number(finalR.pages_count) : null,
+          file_url: String(r.file_url || ""),
+          status: "uploaded",
+          doc_category: String(r.doc_category || "other"),
+          doc_category_label: String(r.doc_category_label || "Прочее"),
+          page_count: r.pages_count ? Number(r.pages_count) : null,
           created_at: new Date().toISOString(),
-          by: "",
+          s3_key: String(r.s3_key || ""),
         };
         setActiveDoc(newDoc);
-        const pages = (finalR.pages as PageData[]) || [];
-        if (pages.length) {
-          setPages(pages);
-          setCurrentPage(1);
-          const allKeys = new Set<string>();
-          pages.forEach((p) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
-          setSelectedItems(allKeys);
-        }
+        setActiveS3Key(String(r.s3_key || ""));
+        setTotalPages(r.pages_count ? Number(r.pages_count) : 0);
+        setPages([]);
+        setCurrentPage(1);
+        return;
       }
     } catch (e) {
       setUploading(false);
@@ -131,36 +134,66 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
     }
   };
 
+  const analyzePage = async (pageNum: number) => {
+    if (!activeDoc || !activeS3Key) return;
+    setAnalyzingPage(pageNum);
+    try {
+      const r = await apiFetch(`${AI_URL}?action=analyze_page`, {
+        method: "POST",
+        body: JSON.stringify({ upload_id: activeDoc.id, page: pageNum, s3_key: activeS3Key }),
+      }, token);
+      if (r.ok) {
+        const pageData: PageData = {
+          page: pageNum,
+          text_preview: r.text_preview || "",
+          items: r.items || [],
+          items_count: r.items_count || 0,
+        };
+        setPages(prev => {
+          const filtered = prev.filter(p => p.page !== pageNum);
+          return [...filtered, pageData].sort((a, b) => a.page - b.page);
+        });
+        // Автовыбор всех позиций
+        const newKeys = new Set(selectedItems);
+        (r.items || []).forEach((_: AiItem, i: number) => newKeys.add(`${pageNum}_${i}`));
+        setSelectedItems(newKeys);
+      }
+    } catch (e) {
+      console.error("analyze page error", e);
+    }
+    setAnalyzingPage(null);
+  };
+
+  const analyzeAllPages = async () => {
+    if (!activeDoc || !totalPages) return;
+    for (let p = 1; p <= totalPages; p++) {
+      await analyzePage(p);
+    }
+    // Завершаем анализ
+    await apiFetch(`${AI_URL}?action=finish_analysis`, {
+      method: "POST",
+      body: JSON.stringify({ upload_id: activeDoc.id }),
+    }, token);
+    await loadUploads();
+  };
+
   const openDoc = async (doc: UploadedDoc) => {
     setActiveDoc(doc);
     setCurrentPage(1);
-    setLoadingPages(true);
+    setPages([]);
+    // Определяем s3_key из file_url
+    const match = doc.file_url.match(/\/bucket\/(.+)$/);
+    const key = match ? match[1] : "";
+    setActiveS3Key(key);
+    setTotalPages(doc.page_count || 0);
+    // Загружаем уже проанализированные страницы
     const r = await apiFetch(`${AI_URL}?action=get&upload_id=${doc.id}`, {}, token);
     if (r.upload?.pages?.length) {
       setPages(r.upload.pages);
       const allKeys = new Set<string>();
       r.upload.pages.forEach((p: PageData) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
       setSelectedItems(allKeys);
-    } else {
-      setPages([]);
     }
-    setLoadingPages(false);
-  };
-
-  const runPageAnalysis = async (doc: UploadedDoc) => {
-    setAnalyzingPages(true);
-    const r = await apiFetch(`${AI_URL}?action=analyze_pages`, {
-      method: "POST",
-      body: JSON.stringify({ upload_id: doc.id }),
-    }, token);
-    if (r.pages?.length) {
-      setPages(r.pages);
-      const allKeys = new Set<string>();
-      r.pages.forEach((p: PageData) => p.items.forEach((_: AiItem, i: number) => allKeys.add(`${p.page}_${i}`)));
-      setSelectedItems(allKeys);
-    }
-    setAnalyzingPages(false);
-    await loadUploads();
   };
 
   const toggleItem = (pageNum: number, idx: number) => {
@@ -183,136 +216,152 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
     setPages([]);
   };
 
-  const allPageItems = pages.flatMap(p => p.items.map((item, i) => ({ ...item, pageNum: p.page, idx: i })));
-  const totalSelected = selectedItems.size;
-
   const currentPageData = pages.find(p => p.page === currentPage);
+  const analyzedCount = pages.length;
+  const totalSelected = selectedItems.size;
+  const byCategory = (cat: string) => uploads.filter(u => cat === "all" || (u.doc_category || "other") === cat);
+  const cats = ["all", ...Array.from(new Set(uploads.map(u => u.doc_category || "other")))];
 
-  const byCategory = (cat: string) => uploads.filter(u => cat === "all" || u.doc_category === cat);
-  const categoriesWithDocs = ["all", ...Array.from(new Set(uploads.map(u => u.doc_category || "other")))];
-
+  // ── Просмотр документа ──────────────────────────────────────────────────
   if (activeDoc) {
+    const cat = DOC_CATEGORIES[activeDoc.doc_category] || DOC_CATEGORIES.other;
     return (
-      <div className="flex flex-col h-full" style={{ minHeight: 500 }}>
-        {/* Заголовок документа */}
+      <div className="flex flex-col" style={{ minHeight: 500 }}>
+        {/* Шапка */}
         <div className="flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-          <button onClick={() => setActiveDoc(null)} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-colors hover:bg-white/10" style={{ color: "rgba(255,255,255,0.5)" }}>
-            <Icon name="ArrowLeft" size={14} />
-            Назад
+          <button onClick={() => setActiveDoc(null)} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg hover:bg-white/10 flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="ArrowLeft" size={14} /> Назад
           </button>
+          <span className="text-xl flex-shrink-0">{cat.icon}</span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">{DOC_CATEGORIES[activeDoc.doc_category]?.icon || "📎"}</span>
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium text-white text-sm truncate">{activeDoc.file_name}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-                style={{ background: `${DOC_CATEGORIES[activeDoc.doc_category]?.color}20`, color: DOC_CATEGORIES[activeDoc.doc_category]?.color }}>
+              <span className="text-xs px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: `${cat.color}20`, color: cat.color }}>
                 {activeDoc.doc_category_label}
               </span>
             </div>
-            {activeDoc.page_count && (
-              <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>
-                {activeDoc.page_count} страниц · {allPageItems.length} позиций найдено
-              </div>
+            <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>
+              {totalPages > 0 ? `${totalPages} стр.` : ""} · Проанализировано: {analyzedCount}/{totalPages || "?"}
+              {totalSelected > 0 && <span style={{ color: "var(--neon-green)" }}> · Выбрано: {totalSelected}</span>}
+            </div>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            {totalPages > 0 && analyzedCount < totalPages && (
+              <button onClick={analyzeAllPages} disabled={analyzingPage !== null}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+                <Icon name={analyzingPage !== null ? "Loader" : "Sparkles"} size={14}
+                  style={{ animation: analyzingPage !== null ? "spin 1s linear infinite" : "none" }} />
+                {analyzingPage !== null ? `Анализирую стр. ${analyzingPage}...` : "Анализировать всё"}
+              </button>
+            )}
+            {totalSelected > 0 && (
+              <button onClick={importSelected}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{ background: "var(--neon-cyan)", color: "#000" }}>
+                <Icon name="Download" size={14} /> Импорт ({totalSelected})
+              </button>
             )}
           </div>
-          {pages.length === 0 && !loadingPages && (
-            <button onClick={() => runPageAnalysis(activeDoc)} disabled={analyzingPages}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
-              style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
-              <Icon name={analyzingPages ? "Loader" : "Sparkles"} size={14} style={{ animation: analyzingPages ? "spin 1s linear infinite" : "none" }} />
-              {analyzingPages ? "Анализирую..." : "Запустить анализ"}
-            </button>
-          )}
-          {pages.length > 0 && totalSelected > 0 && (
-            <button onClick={importSelected}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
-              style={{ background: "var(--neon-cyan)", color: "#000" }}>
-              <Icon name="Download" size={14} />
-              Импортировать {totalSelected}
-            </button>
-          )}
         </div>
 
-        {loadingPages && (
-          <div className="flex-1 flex items-center justify-center py-12">
-            <div className="text-center">
-              <div className="w-10 h-10 rounded-full border-2 border-white/10 border-t-orange-400 animate-spin mx-auto mb-3" />
-              <div className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>Загружаю данные...</div>
+        {totalPages === 0 && (
+          <div className="flex-1 flex items-center justify-center py-16 text-center">
+            <div>
+              <div className="text-4xl mb-3">📄</div>
+              <div className="text-sm text-white mb-1">Документ загружен и классифицирован</div>
+              <div className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>Не удалось извлечь текст. Возможно, документ содержит только изображения.</div>
             </div>
           </div>
         )}
 
-        {!loadingPages && pages.length === 0 && (
-          <div className="flex-1 flex items-center justify-center py-12">
-            <div className="text-center">
-              <span className="text-4xl mb-3 block">📄</span>
-              <div className="text-sm font-medium text-white mb-1">Документ ещё не проанализирован постранично</div>
-              <div className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.35)" }}>
-                Нажмите «Запустить анализ» чтобы AI постранично изучил документ
-              </div>
-            </div>
-          </div>
-        )}
-
-        {pages.length > 0 && (
-          <div className="flex gap-4 flex-1 overflow-hidden" style={{ minHeight: 400 }}>
-            {/* Навигация по страницам */}
-            <div className="flex-shrink-0 w-44 overflow-y-auto space-y-1.5 pr-1" style={{ scrollbarWidth: "thin" }}>
-              {pages.map(p => (
-                <button key={p.page} onClick={() => setCurrentPage(p.page)}
-                  className="w-full text-left p-2.5 rounded-xl transition-all"
-                  style={{
-                    background: currentPage === p.page ? "rgba(0,212,255,0.12)" : "rgba(255,255,255,0.04)",
-                    border: `1px solid ${currentPage === p.page ? "rgba(0,212,255,0.3)" : "rgba(255,255,255,0.06)"}`,
-                  }}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-semibold" style={{ color: currentPage === p.page ? "var(--neon-cyan)" : "rgba(255,255,255,0.6)" }}>
-                      Стр. {p.page}
-                    </span>
-                    {p.items_count > 0 && (
-                      <span className="text-xs px-1.5 py-0.5 rounded-full font-bold"
-                        style={{ background: "rgba(0,255,136,0.15)", color: "var(--neon-green)" }}>
-                        {p.items_count}
+        {totalPages > 0 && (
+          <div className="flex gap-4" style={{ minHeight: 420 }}>
+            {/* Список страниц */}
+            <div className="flex-shrink-0 w-40 overflow-y-auto space-y-1" style={{ scrollbarWidth: "thin" }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => {
+                const pd = pages.find(x => x.page === p);
+                const isAnalyzing = analyzingPage === p;
+                const isActive = currentPage === p;
+                return (
+                  <button key={p} onClick={() => { setCurrentPage(p); if (!pd) analyzePage(p); }}
+                    className="w-full text-left p-2.5 rounded-xl transition-all"
+                    style={{
+                      background: isActive ? "rgba(0,212,255,0.12)" : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${isActive ? "rgba(0,212,255,0.3)" : "rgba(255,255,255,0.06)"}`,
+                    }}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-semibold" style={{ color: isActive ? "var(--neon-cyan)" : "rgba(255,255,255,0.6)" }}>
+                        Стр. {p}
                       </span>
+                      {isAnalyzing ? (
+                        <div className="w-3 h-3 rounded-full border border-orange-400 border-t-transparent animate-spin" />
+                      ) : pd ? (
+                        <span className="text-xs font-bold px-1 rounded" style={{ background: pd.items_count > 0 ? "rgba(0,255,136,0.15)" : "rgba(255,255,255,0.06)", color: pd.items_count > 0 ? "var(--neon-green)" : "rgba(255,255,255,0.3)" }}>
+                          {pd.items_count}
+                        </span>
+                      ) : (
+                        <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>—</span>
+                      )}
+                    </div>
+                    {pd && (
+                      <div className="text-xs leading-tight" style={{ color: "rgba(255,255,255,0.25)", fontSize: 10 }}>
+                        {pd.text_preview?.slice(0, 50)}
+                      </div>
                     )}
-                  </div>
-                  <div className="text-xs leading-tight line-clamp-2" style={{ color: "rgba(255,255,255,0.3)" }}>
-                    {p.text_preview?.slice(0, 80) || "..."}
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Содержимое страницы */}
             <div className="flex-1 overflow-y-auto space-y-3" style={{ scrollbarWidth: "thin" }}>
+              {!currentPageData && analyzingPage !== currentPage && (
+                <div className="py-8 text-center rounded-xl" style={{ border: "1px dashed rgba(255,255,255,0.08)" }}>
+                  <Icon name="MousePointerClick" size={20} style={{ color: "rgba(255,255,255,0.2)", margin: "0 auto 8px" }} />
+                  <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Нажмите на страницу чтобы запустить анализ</div>
+                </div>
+              )}
+              {analyzingPage === currentPage && (
+                <div className="py-8 text-center rounded-xl" style={{ background: "rgba(255,107,26,0.05)", border: "1px solid rgba(255,107,26,0.15)" }}>
+                  <div className="w-8 h-8 rounded-full border-2 border-orange-400/30 border-t-orange-400 animate-spin mx-auto mb-3" />
+                  <div className="text-sm text-white">AI анализирует страницу {currentPage}...</div>
+                </div>
+              )}
               {currentPageData && (
                 <>
-                  {/* Превью текста страницы */}
-                  <div className="p-3 rounded-xl text-xs leading-relaxed" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon name="FileText" size={12} style={{ color: "rgba(255,255,255,0.3)" }} />
-                      <span className="font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>Страница {currentPageData.page} — текст</span>
+                  {currentPageData.text_preview && (
+                    <div className="p-3 rounded-xl text-xs leading-relaxed font-mono"
+                      style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <Icon name="FileText" size={11} style={{ color: "rgba(255,255,255,0.25)" }} />
+                        <span style={{ color: "rgba(255,255,255,0.4)" }}>Стр. {currentPage} — текст</span>
+                        <button onClick={() => analyzePage(currentPage)} disabled={analyzingPage !== null}
+                          className="ml-auto text-xs px-2 py-0.5 rounded"
+                          style={{ background: "rgba(255,107,26,0.1)", color: "var(--neon-orange)" }}>
+                          Перезапустить
+                        </button>
+                      </div>
+                      {currentPageData.text_preview}
                     </div>
-                    <div className="font-mono">{currentPageData.text_preview}</div>
-                  </div>
-
-                  {/* Позиции на этой странице */}
+                  )}
                   {currentPageData.items.length > 0 ? (
                     <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
-                      <div className="px-3 py-2 flex items-center justify-between" style={{ background: "rgba(0,255,136,0.06)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div className="px-3 py-2 flex items-center justify-between"
+                        style={{ background: "rgba(0,255,136,0.05)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                         <span className="text-xs font-semibold" style={{ color: "var(--neon-green)" }}>
-                          Найдено {currentPageData.items.length} позиций
+                          {currentPageData.items_count} позиций
                         </span>
                         <div className="flex gap-2">
                           <button onClick={() => {
-                            const keys = new Set(selectedItems);
-                            currentPageData.items.forEach((_, i) => keys.add(`${currentPageData.page}_${i}`));
-                            setSelectedItems(keys);
+                            const s = new Set(selectedItems);
+                            currentPageData.items.forEach((_, i) => s.add(`${currentPage}_${i}`));
+                            setSelectedItems(s);
                           }} className="text-xs px-2 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>Все</button>
                           <button onClick={() => {
-                            const keys = new Set(selectedItems);
-                            currentPageData.items.forEach((_, i) => keys.delete(`${currentPageData.page}_${i}`));
-                            setSelectedItems(keys);
+                            const s = new Set(selectedItems);
+                            currentPageData.items.forEach((_, i) => s.delete(`${currentPage}_${i}`));
+                            setSelectedItems(s);
                           }} className="text-xs px-2 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>Снять</button>
                         </div>
                       </div>
@@ -322,30 +371,30 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
                             <th className="p-2 w-7"></th>
                             <th className="p-2 text-left font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Раздел</th>
                             <th className="p-2 text-left font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Наименование</th>
-                            <th className="p-2 text-center w-14 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Ед.</th>
+                            <th className="p-2 text-center w-12 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Ед.</th>
                             <th className="p-2 text-right w-14 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Кол.</th>
                             <th className="p-2 text-right w-20 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Цена</th>
                           </tr>
                         </thead>
                         <tbody>
                           {currentPageData.items.map((item, i) => {
-                            const key = `${currentPageData.page}_${i}`;
-                            const isSelected = selectedItems.has(key);
+                            const key = `${currentPage}_${i}`;
+                            const sel = selectedItems.has(key);
                             return (
-                              <tr key={i} onClick={() => toggleItem(currentPageData.page, i)}
+                              <tr key={i} onClick={() => toggleItem(currentPage, i)}
                                 className="cursor-pointer hover:bg-white/5"
-                                style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: isSelected ? "rgba(0,212,255,0.04)" : "transparent" }}>
+                                style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: sel ? "rgba(0,212,255,0.04)" : "transparent" }}>
                                 <td className="p-2 text-center">
                                   <div className="w-4 h-4 rounded flex items-center justify-center mx-auto"
-                                    style={{ background: isSelected ? "var(--neon-cyan)" : "rgba(255,255,255,0.08)", border: isSelected ? "none" : "1px solid rgba(255,255,255,0.15)" }}>
-                                    {isSelected && <Icon name="Check" size={9} style={{ color: "#000" }} />}
+                                    style={{ background: sel ? "var(--neon-cyan)" : "rgba(255,255,255,0.08)", border: sel ? "none" : "1px solid rgba(255,255,255,0.15)" }}>
+                                    {sel && <Icon name="Check" size={9} style={{ color: "#000" }} />}
                                   </div>
                                 </td>
                                 <td className="p-2" style={{ color: "rgba(255,255,255,0.4)" }}>{item.section}</td>
                                 <td className="p-2 text-white font-medium">{item.name}</td>
                                 <td className="p-2 text-center" style={{ color: "rgba(255,255,255,0.5)" }}>{item.unit}</td>
                                 <td className="p-2 text-right" style={{ color: "rgba(255,255,255,0.6)" }}>{item.qty || "—"}</td>
-                                <td className="p-2 text-right font-semibold" style={{ color: item.price_per_unit ? "var(--neon-green)" : "rgba(255,255,255,0.25)" }}>
+                                <td className="p-2 text-right font-semibold" style={{ color: item.price_per_unit ? "var(--neon-green)" : "rgba(255,255,255,0.2)" }}>
                                   {item.price_per_unit ? new Intl.NumberFormat("ru-RU").format(item.price_per_unit) : "—"}
                                 </td>
                               </tr>
@@ -355,9 +404,8 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
                       </table>
                     </div>
                   ) : (
-                    <div className="py-6 text-center rounded-xl" style={{ border: "1px dashed rgba(255,255,255,0.08)" }}>
-                      <Icon name="Search" size={20} style={{ color: "rgba(255,255,255,0.2)", margin: "0 auto 8px" }} />
-                      <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>На этой странице позиции не обнаружены</div>
+                    <div className="py-5 text-center rounded-xl" style={{ border: "1px dashed rgba(255,255,255,0.07)" }}>
+                      <div className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>На этой странице позиции не найдены</div>
                     </div>
                   )}
                 </>
@@ -369,19 +417,19 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
     );
   }
 
+  // ── Список документов ───────────────────────────────────────────────────
   return (
     <div>
-      {/* Заголовок */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "var(--neon-orange)" }}>Проектная документация</div>
-          <h3 className="font-semibold text-white">Загрузка и анализ документов</h3>
+          <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "var(--neon-orange)" }}>ПП РФ №87</div>
+          <h3 className="font-semibold text-white">Проектная документация</h3>
           <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>
-            AI автоматически распределит по разделам и извлечёт позиции постранично
+            AI определит раздел и разберёт по позициям постранично
           </p>
         </div>
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
           style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
           <Icon name="Upload" size={16} />
           Загрузить
@@ -390,59 +438,35 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
           onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
       </div>
 
-      {/* Прогресс загрузки */}
-      {uploading && (
-        <div className="mb-4 p-4 rounded-xl flex items-center gap-3" style={{ background: "rgba(255,107,26,0.08)", border: "1px solid rgba(255,107,26,0.2)" }}>
+      {(uploading || uploadProgress) && (
+        <div className="mb-4 p-4 rounded-xl flex items-center gap-3"
+          style={{ background: "rgba(255,107,26,0.08)", border: "1px solid rgba(255,107,26,0.2)" }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
             style={{ background: "rgba(255,107,26,0.15)" }}>
             <Icon name="Loader" size={16} style={{ color: "var(--neon-orange)", animation: "spin 1s linear infinite" }} />
           </div>
           <div>
-            <div className="text-sm font-medium text-white">{uploadProgress}</div>
+            <div className="text-sm font-medium text-white">{uploadProgress || "Обработка..."}</div>
             <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>Не закрывайте страницу</div>
           </div>
         </div>
       )}
 
-      {/* Разделы документации */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        {Object.entries(DOC_CATEGORIES).map(([key, cat]) => {
-          const docs = uploads.filter(u => (u.doc_category || "other") === key);
-          if (docs.length === 0) return null;
-          return (
-            <button key={key} onClick={() => setFilterCategory(filterCategory === key ? "all" : key)}
-              className="p-3 rounded-xl text-left transition-all"
-              style={{
-                background: filterCategory === key ? `${cat.color}15` : "rgba(255,255,255,0.04)",
-                border: `1px solid ${filterCategory === key ? `${cat.color}40` : "rgba(255,255,255,0.07)"}`,
-              }}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-base">{cat.icon}</span>
-                <span className="text-xs font-bold px-1.5 py-0.5 rounded-full"
-                  style={{ background: `${cat.color}20`, color: cat.color }}>{docs.length}</span>
-              </div>
-              <div className="text-xs font-medium text-white">{cat.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Фильтр по категориям */}
+      {/* Фильтр по разделам */}
       {uploads.length > 0 && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          {categoriesWithDocs.map(cat => {
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {cats.map(cat => {
             const info = cat === "all" ? { label: "Все", icon: "📂", color: "rgba(255,255,255,0.5)" } : DOC_CATEGORIES[cat];
             const count = cat === "all" ? uploads.length : uploads.filter(u => (u.doc_category || "other") === cat).length;
             return (
               <button key={cat} onClick={() => setFilterCategory(cat)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                 style={{
-                  background: filterCategory === cat ? (info?.color ? `${info.color}20` : "rgba(255,255,255,0.12)") : "rgba(255,255,255,0.04)",
+                  background: filterCategory === cat ? `${info?.color}20` : "rgba(255,255,255,0.04)",
                   color: filterCategory === cat ? (info?.color || "white") : "rgba(255,255,255,0.5)",
-                  border: `1px solid ${filterCategory === cat ? (info?.color ? `${info.color}40` : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.07)"}`,
+                  border: `1px solid ${filterCategory === cat ? `${info?.color}40` : "rgba(255,255,255,0.07)"}`,
                 }}>
-                {info?.icon && <span>{info.icon}</span>}
-                {info?.label || cat} · {count}
+                <span>{info?.icon}</span> {info?.label?.split(" ")[0]} · {count}
               </button>
             );
           })}
@@ -455,40 +479,30 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
           {byCategory(filterCategory).map(doc => {
             const cat = DOC_CATEGORIES[doc.doc_category || "other"] || DOC_CATEGORIES.other;
             return (
-              <div key={doc.id} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all hover:bg-white/5 group"
-                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
-                onClick={() => openDoc(doc)}>
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-lg"
+              <div key={doc.id} onClick={() => openDoc(doc)}
+                className="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all hover:bg-white/5 group"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
                   style={{ background: `${cat.color}15`, border: `1px solid ${cat.color}30` }}>
                   {cat.icon}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-white truncate">{doc.file_name}</span>
                     <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0"
                       style={{ background: `${cat.color}15`, color: cat.color }}>
-                      {cat.label}
+                      {cat.label.split(" ")[0]}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    {doc.page_count && (
-                      <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-                        {doc.page_count} стр.
-                      </span>
-                    )}
-                    <span className="text-xs" style={{ color: doc.status === "done" ? "var(--neon-green)" : doc.status === "error" ? "#ef4444" : "rgba(255,255,255,0.3)" }}>
-                      {doc.status === "done" ? "✓ Обработан" : doc.status === "error" ? "Ошибка" : doc.status === "processing" ? "Обрабатывается..." : "Ожидает"}
+                  <div className="flex items-center gap-3 mt-0.5 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                    {doc.page_count && <span>{doc.page_count} стр.</span>}
+                    <span style={{ color: doc.status === "done" ? "var(--neon-green)" : doc.status === "uploaded" ? "var(--neon-cyan)" : "rgba(255,255,255,0.3)" }}>
+                      {doc.status === "done" ? "✓ Обработан" : doc.status === "uploaded" ? "Загружен" : doc.status}
                     </span>
-                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
-                      {new Date(doc.created_at).toLocaleDateString("ru-RU")}
-                    </span>
+                    <span>{new Date(doc.created_at).toLocaleDateString("ru-RU")}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-xs px-2 py-1 rounded-lg" style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)" }}>
-                    Открыть →
-                  </span>
-                </div>
+                <Icon name="ChevronRight" size={16} style={{ color: "rgba(255,255,255,0.2)", flexShrink: 0 }} className="opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             );
           })}
@@ -498,15 +512,17 @@ export default function DocUploadManager({ token, projectId, specId, onImport }:
           <div className="text-3xl mb-3">📂</div>
           <div className="text-sm font-medium text-white mb-1">Документы не загружены</div>
           <div className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>
-            Загрузите PDF, Excel или CSV — AI автоматически определит тип<br />и разберёт по позициям постранично
+            Загрузите PDF, Excel, CSV — AI определит раздел по ПП РФ №87<br/>и разберёт по позициям постранично
           </div>
-          <div className="flex items-center justify-center gap-4 flex-wrap">
-            {Object.values(DOC_CATEGORIES).slice(0, 5).map(cat => (
-              <div key={cat.label} className="flex items-center gap-1.5 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-                <span>{cat.icon}</span>
-                <span>{cat.label}</span>
-              </div>
-            ))}
+          <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto text-left">
+            {["specification","work_statement","estimate","architecture","construction","engineering"].map(k => {
+              const c = DOC_CATEGORIES[k];
+              return (
+                <div key={k} className="flex items-center gap-1.5 text-xs p-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.4)" }}>
+                  <span>{c.icon}</span><span className="truncate">{c.label.split(" ")[0]}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
