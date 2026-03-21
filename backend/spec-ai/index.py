@@ -415,38 +415,55 @@ def handler(event: dict, context) -> dict:
         url = cdn_url(final_key)
         print(f"[spec-ai] saved file={file_name} size={len(file_bytes)} key={final_key}")
 
-        # Пробуем нативное извлечение текста (быстро, без OCR)
-        extracted_text = extract_text_from_pdf_native(file_bytes) if file_name.lower().endswith(".pdf") else ""
-        if not extracted_text and file_name.lower().endswith((".xlsx", ".xls", ".csv")):
-            extracted_text, _ = extract_text_from_file(file_bytes, file_name)
-
-        print(f"[spec-ai] native text={len(extracted_text)} chars")
-        is_scan = len(extracted_text) < 200 and file_name.lower().endswith(".pdf")
-        pages_text = split_text_into_pages(extracted_text) if extracted_text else []
-
-        # Классифицируем только если есть текст (быстро)
+        is_pdf = file_name.lower().endswith(".pdf")
+        is_scan = False
+        pages_count = 0
+        pages_data_init = []
         doc_info = {"category": "other", "summary": ""}
-        if extracted_text and os.environ.get("GIGACHAT_AUTH_KEY"):
-            try: doc_info = classify_document(extracted_text)
-            except Exception as e: print(f"[spec-ai] classify: {e}")
 
-        # Для сканов — создаём одну "страницу" с флагом needs_ocr
-        if is_scan:
-            pages_data_init = [{"page": 1, "text": "", "text_preview": "", "items": [], "items_count": 0, "analyzed": False, "needs_ocr": True}]
-            pages_count = 1
+        if is_pdf:
+            # Быстрая попытка нативного текста (таймаут 8 сек)
+            extracted_text = extract_text_from_pdf_native(file_bytes)
+            print(f"[spec-ai] native text={len(extracted_text)} chars")
+            if len(extracted_text) >= 200:
+                # Текстовый PDF — сохраняем страницы, классифицируем
+                pages_list = split_text_into_pages(extracted_text)
+                pages_count = len(pages_list)
+                pages_data_init = [
+                    {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False, "needs_ocr": False}
+                    for i, p in enumerate(pages_list)
+                ]
+                if os.environ.get("GIGACHAT_AUTH_KEY"):
+                    try: doc_info = classify_document(extracted_text)
+                    except Exception as e: print(f"[spec-ai] classify: {e}")
+            else:
+                # Скан — считаем JPEG страницы для информации
+                is_scan = True
+                jpeg_count = len(extract_jpegs_from_pdf(file_bytes, max_images=100))
+                pages_count = max(jpeg_count, 1)
+                print(f"[spec-ai] scan detected, ~{pages_count} pages (JPEGs)")
+                pages_data_init = [{"page": 1, "text": "", "text_preview": "", "items": [], "items_count": 0, "analyzed": False, "needs_ocr": True}]
+                pages_count = 0  # 0 = скан, фронт покажет кнопку OCR
         else:
-            pages_data_init = [
-                {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False, "needs_ocr": False}
-                for i, p in enumerate(pages_text)
-            ]
-            pages_count = len(pages_text)
+            # Excel/CSV
+            extracted_text, _ = extract_text_from_file(file_bytes, file_name)
+            if extracted_text:
+                pages_list = split_text_into_pages(extracted_text)
+                pages_count = len(pages_list)
+                pages_data_init = [
+                    {"page": i+1, "text": p, "text_preview": p[:400], "items": [], "items_count": 0, "analyzed": False, "needs_ocr": False}
+                    for i, p in enumerate(pages_list)
+                ]
+                if os.environ.get("GIGACHAT_AUTH_KEY"):
+                    try: doc_info = classify_document(extracted_text)
+                    except Exception as e: print(f"[spec-ai] classify: {e}")
 
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO {S}.spec_uploads (project_id,file_name,file_url,status,uploaded_by,doc_category,page_count,pages_data) "
             f"VALUES (%s,%s,%s,'uploaded',%s,%s,%s,%s) RETURNING id",
             (project_id, file_name, url, staff["id"],
-             doc_info.get("category","other"), pages_count,
+             doc_info.get("category","other"), pages_count if not is_scan else None,
              json.dumps(pages_data_init, ensure_ascii=False)))
         db_upload_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
@@ -458,6 +475,7 @@ def handler(event: dict, context) -> dict:
             "upload_id": db_upload_id,
             "file_url": url,
             "status": "uploaded",
+            "is_scan": is_scan,
             "doc_category": doc_info.get("category", "other"),
             "doc_category_label": DOC_CATEGORIES.get(doc_info.get("category","other"), "Прочее"),
             "doc_summary": doc_info.get("summary", ""),

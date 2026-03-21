@@ -107,7 +107,7 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
         if (r.upload_id && !uploadSessId) uploadSessId = String(r.upload_id);
         if (!r.done) continue;
 
-        // Файл загружен и классифицирован
+        // Файл загружен
         setUploadProgress("");
         setUploading(false);
         await loadUploads();
@@ -125,7 +125,8 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
         };
         setActiveDoc(newDoc);
         setActiveS3Key(String(r.s3_key || ""));
-        setTotalPages(r.pages_count ? Number(r.pages_count) : 0);
+        // is_scan=true → pages_count=0 → фронт покажет кнопку OCR
+        setTotalPages(r.is_scan ? 0 : (r.pages_count ? Number(r.pages_count) : 0));
         setPages([]);
         setCurrentPage(1);
         return;
