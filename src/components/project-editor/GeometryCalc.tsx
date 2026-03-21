@@ -61,16 +61,23 @@ const SECTIONS: CalcSection[] = [
 // ─── Формулы расчёта объёмов ─────────────────────────────────────────────────
 
 function calcFoundation(p: Record<string, number>): CalcVolume[] {
-  const perimeter = 2 * ((p.length || 0) + (p.width || 0));
-  const volume    = perimeter * (p.height || 0) * (p.thickness || 0) / 1000; // мм → м
-  const area      = perimeter * (p.height || 0) / 1000;
-  const armature  = volume * 80; // кг/м³ — норма армирования ленточного ф-та
-  const formwork  = area * 2;    // с двух сторон
+  const outerPerimeter = 2 * ((p.length || 0) + (p.width || 0));
+  // Внутренние несущие стены: кол-во рядов вдоль длины и ширины × соответствующий размер
+  const innerLen = (p.inner_rows_along_width  || 0) * (p.length || 0);
+  const innerWid = (p.inner_rows_along_length || 0) * (p.width  || 0);
+  const totalPerimeter = outerPerimeter + innerLen + innerWid;
+  const thickM  = (p.thickness || 0) / 1000;                // мм → м
+  const volume  = totalPerimeter * (p.height || 0) * thickM;
+  const area    = totalPerimeter * (p.height || 0);
+  const armature = volume * 80;  // кг/м³
+  const formwork = area * 2;     // с двух сторон (внутренние ленты тоже двусторонние)
   return [
-    { label: "Объём бетона",        value: +volume.toFixed(2),   unit: "м³",  formula: `периметр(${perimeter.toFixed(1)}м) × H × B` },
-    { label: "Площадь опалубки",    value: +formwork.toFixed(1), unit: "м²",  formula: "площадь ленты × 2 стороны" },
-    { label: "Арматура А400",       value: +armature.toFixed(0), unit: "кг",  formula: `${volume.toFixed(2)}м³ × 80 кг/м³` },
-    { label: "Периметр",            value: +perimeter.toFixed(1),unit: "п.м", formula: "2×(L+W)" },
+    { label: "Периметр наружных стен", value: +outerPerimeter.toFixed(1), unit: "п.м", formula: "2×(L+W)" },
+    { label: "Длина внутренних лент",  value: +(innerLen + innerWid).toFixed(1), unit: "п.м", formula: `${p.inner_rows_along_width||0} рядов×L + ${p.inner_rows_along_length||0} рядов×W` },
+    { label: "Общая длина ленты",      value: +totalPerimeter.toFixed(1), unit: "п.м", formula: "наружные + внутренние" },
+    { label: "Объём бетона",           value: +volume.toFixed(2),         unit: "м³",  formula: `${totalPerimeter.toFixed(1)}п.м × ${p.height||0}м × ${thickM}м` },
+    { label: "Площадь опалубки",       value: +formwork.toFixed(1),       unit: "м²",  formula: "площадь ленты × 2 стороны" },
+    { label: "Арматура А400 (ор.)",    value: +armature.toFixed(0),       unit: "кг",  formula: `${volume.toFixed(2)}м³ × 80 кг/м³` },
   ];
 }
 
