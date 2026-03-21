@@ -2,8 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { PROJECTS_URL, DEFAULT_SECTIONS, fmt, authFetch } from "./types";
 import type { Project, Spec, SpecItem, HistoryEntry } from "./types";
+import type { AiItem } from "@/pages/staff/materials-types";
 
-export default function SpecEditor({ project, token, role }: { project: Project; token: string; role: string }) {
+export default function SpecEditor({ project, token, role, pendingImport, onPendingImportClear }: {
+  project: Project; token: string; role: string;
+  pendingImport?: AiItem[] | null;
+  onPendingImportClear?: () => void;
+}) {
   const [spec, setSpec] = useState<Spec | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<number | null>(null);
@@ -13,6 +18,7 @@ export default function SpecEditor({ project, token, role }: { project: Project;
   const [newItemSection, setNewItemSection] = useState(DEFAULT_SECTIONS[0]);
   const [msg, setMsg] = useState("");
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [importBanner, setImportBanner] = useState(false);
 
   const canEdit = role === "architect" || role === "constructor";
 
@@ -25,12 +31,49 @@ export default function SpecEditor({ project, token, role }: { project: Project;
 
   useEffect(() => { loadSpec(); }, [loadSpec]);
 
+  // Показываем баннер с импортированными позициями
+  useEffect(() => {
+    if (pendingImport && pendingImport.length > 0) setImportBanner(true);
+  }, [pendingImport]);
+
   const createSpec = async () => {
     const res = await authFetch(`${PROJECTS_URL}?action=spec_create`, {
       method: "POST",
       body: JSON.stringify({ project_id: project.id, items: [] }),
     }, token);
     if (res.ok) loadSpec();
+  };
+
+  const importItems = async (items: AiItem[]) => {
+    let specId = spec?.id;
+    if (!specId) {
+      const res = await authFetch(`${PROJECTS_URL}?action=spec_create`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, items: [] }),
+      }, token);
+      if (!res.ok || !res.spec_id) return;
+      specId = res.spec_id;
+    }
+    let added = 0;
+    for (const item of items) {
+      const r = await authFetch(`${PROJECTS_URL}?action=spec_add_item`, {
+        method: "POST",
+        body: JSON.stringify({
+          spec_id: specId,
+          section: item.section || "Прочее",
+          name: item.name,
+          unit: item.unit || "шт",
+          qty: item.qty || 0,
+          price_per_unit: item.price_per_unit || 0,
+          note: item.note || "",
+        }),
+      }, token);
+      if (r.ok) added++;
+    }
+    setMsg(`Импортировано ${added} позиций из документа`);
+    setImportBanner(false);
+    onPendingImportClear?.();
+    loadSpec();
   };
 
   const updateItem = async (item: SpecItem, field: string, value: string | number) => {
@@ -183,6 +226,38 @@ export default function SpecEditor({ project, token, role }: { project: Project;
 
   return (
     <div>
+      {/* Баннер импорта из документации */}
+      {importBanner && pendingImport && pendingImport.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl flex items-start gap-3"
+          style={{ background: "rgba(0,212,255,0.08)", border: "1px solid rgba(0,212,255,0.25)" }}>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(0,212,255,0.15)" }}>
+            <Icon name="Sparkles" size={18} style={{ color: "var(--neon-cyan)" }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-white text-sm mb-0.5">
+              Готово к импорту: {pendingImport.length} позиций из документа
+            </div>
+            <div className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>
+              AI извлёк позиции постранично. Нажмите «Добавить в ведомость» чтобы импортировать.
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => importItems(pendingImport)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                style={{ background: "var(--neon-cyan)", color: "#000" }}>
+                <Icon name="Download" size={13} />
+                Добавить в ведомость
+              </button>
+              <button onClick={() => { setImportBanner(false); onPendingImportClear?.(); }}
+                className="px-3 py-1.5 rounded-lg text-xs"
+                style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
