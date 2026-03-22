@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import { AI_URL, apiFetch, type AiItem } from "@/pages/staff/materials-types";
 
+const NOTIFY_URL = "https://functions.poehali.dev/e936bb42-3c4d-4c99-88d7-6d976ca7cb7c";
+
 export const DOC_CATEGORIES: Record<string, { label: string; icon: string; color: string; group: string }> = {
   explanatory_note:  { label: "Пояснительная записка (ПЗ)", icon: "📝", color: "#A855F7", group: "text" },
   construction_org:  { label: "Проект организации строительства (ПОС)", icon: "🏗️", color: "#6366F1", group: "text" },
@@ -64,6 +66,7 @@ type PipelineStep = "idle" | "uploading" | "analyzing" | "vor" | "supply" | "est
 interface DocUploadManagerProps {
   token: string;
   projectId?: number;
+  projectName?: string;
   onImport: (items: AiItem[], category: string) => void;
 }
 
@@ -71,7 +74,7 @@ function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU").format(Math.round(n));
 }
 
-export default function DocUploadManager({ token, projectId, onImport }: DocUploadManagerProps) {
+export default function DocUploadManager({ token, projectId, projectName = "Проект", onImport }: DocUploadManagerProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Документы
@@ -299,12 +302,41 @@ export default function DocUploadManager({ token, projectId, onImport }: DocUplo
   // ── Отправка в снабжение ──────────────────────────────────────────────────
   const sendToSupply = async () => {
     if (vor.length === 0) return;
-    setSupplyMsg("Отправляю запрос в снабжение...");
-    await new Promise(r => setTimeout(r, 800));
-    setSupplyMsg("");
-    setSupplySent(true);
-    log("📬 ВОР отправлена в снабжение для запроса КП от поставщиков");
-    setStep("supply");
+    setSupplyMsg("Отправляю...");
+    log("📬 Отправляю уведомления в снабжение...");
+    try {
+      const r = await apiFetch(`${NOTIFY_URL}?action=send_vor_notification`, {
+        method: "POST",
+        body: JSON.stringify({
+          project_name: projectName,
+          vor_count: vor.length,
+          vor_sections: vorSections,
+          doc_name: activeDoc?.file_name || "",
+        }),
+      }, token);
+
+      setSupplyMsg("");
+      setSupplySent(true);
+      setStep("supply");
+
+      if (r.ok) {
+        const res = r.results || {};
+        if (res.sms_sent?.length) log(`📱 SMS отправлено: ${res.sms_sent.join(", ")}`);
+        if (res.sms_failed?.length) log(`⚠️ SMS не отправлено: ${res.sms_failed.map((f: {name: string}) => f.name).join(", ")}`);
+        if (res.bitrix_tasks?.length) log(`✅ Задача в Битрикс24 создана (ID: ${res.bitrix_tasks[0].task_id})`);
+        if (res.bitrix_failed?.length) log(`⚠️ Битрикс: ${res.bitrix_failed[0]}`);
+        if (!res.sms_sent?.length && !res.bitrix_tasks?.length) {
+          log("ℹ️ Уведомления отправлены. Укажите телефоны и Битрикс ID сотрудников в настройках для полной работы.");
+        }
+      } else {
+        log(`⚠️ ${r.error || "Ошибка отправки уведомлений"}`);
+      }
+    } catch (e) {
+      setSupplyMsg("");
+      setSupplySent(true);
+      setStep("supply");
+      log("⚠️ Ошибка отправки уведомлений: " + String(e));
+    }
   };
 
   // ── Формирование сметы (после получения цен) ──────────────────────────────

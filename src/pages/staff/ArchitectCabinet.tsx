@@ -1587,6 +1587,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
         <DocUploadManager
           token={token}
           projectId={proj.id}
+          projectName={proj.name}
           onImport={(items) => { setPendingDocItems(items); }}
         />
       )}

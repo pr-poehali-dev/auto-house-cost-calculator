@@ -30,10 +30,30 @@ interface ResetModal {
   confirm: string;
 }
 
+const NOTIFY_URL = "https://functions.poehali.dev/e936bb42-3c4d-4c99-88d7-6d976ca7cb7c";
+
+interface StaffContact {
+  id: number;
+  full_name: string;
+  role_code: string;
+  phone: string | null;
+  email: string | null;
+  bitrix_user_id: number | null;
+  notify_sms: boolean;
+  notify_bitrix: boolean;
+}
+
 const EMPTY_NEW = { full_name: "", login: "", role_code: "architect", password: "", confirm: "" };
 
 export default function AdminCabinet({ user, token }: { user: StaffUser; token: string }) {
-  const [tab, setTab] = useState<"staff" | "suppliers">("staff");
+  const [tab, setTab] = useState<"staff" | "suppliers" | "contacts">("staff");
+
+  // Контакты сотрудников
+  const [contactsList, setContactsList] = useState<StaffContact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [editingContact, setEditingContact] = useState<number | null>(null);
+  const [contactBuf, setContactBuf] = useState<Partial<StaffContact>>({});
+  const [savingContact, setSavingContact] = useState(false);
 
   // Сотрудники
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -70,8 +90,28 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
     setSupLoading(false);
   }, [token]);
 
+  const loadContacts = useCallback(async () => {
+    setContactsLoading(true);
+    const res = await authFetch(`${NOTIFY_URL}?action=get_staff_contacts`, {}, token);
+    setContactsList(Array.isArray(res.staff) ? res.staff : []);
+    setContactsLoading(false);
+  }, [token]);
+
+  const saveContact = async (id: number) => {
+    setSavingContact(true);
+    await authFetch(`${NOTIFY_URL}?action=update_staff_contacts`, {
+      method: "POST",
+      body: JSON.stringify({ staff_id: id, ...contactBuf }),
+    }, token);
+    setSavingContact(false);
+    setEditingContact(null);
+    setContactBuf({});
+    loadContacts();
+  };
+
   useEffect(() => { loadStaff(); }, [loadStaff]);
   useEffect(() => { if (tab === "suppliers" && suppliers.length === 0) loadSuppliers(); }, [tab]);
+  useEffect(() => { if (tab === "contacts") loadContacts(); }, [tab, loadContacts]);
 
   const openStaffReset = (m: StaffMember) => {
     setMsg(null);
@@ -176,6 +216,7 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
         {([
           { key: "staff", label: "Сотрудники", count: staffList.length, icon: "Users" },
           { key: "suppliers", label: "Поставщики", count: suppliers.length, icon: "Truck" },
+          { key: "contacts", label: "Уведомления", count: 0, icon: "Bell" },
         ] as const).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
@@ -402,6 +443,164 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
             </div>
           )}
         </>
+      )}
+
+      {/* ── Вкладка: Уведомления / контакты ── */}
+      {tab === "contacts" && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div className="px-5 py-4 flex items-center justify-between"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
+            <div>
+              <div className="font-semibold text-white">Контакты для уведомлений</div>
+              <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
+                Укажите телефон и Битрикс24 ID для каждого сотрудника — система будет отправлять SMS и создавать задачи
+              </div>
+            </div>
+            <button onClick={loadContacts} disabled={contactsLoading}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs transition-all hover:bg-white/10"
+              style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
+              <Icon name={contactsLoading ? "Loader" : "RefreshCw"} size={12} className={contactsLoading ? "animate-spin" : ""} />
+              Обновить
+            </button>
+          </div>
+
+          {contactsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-white/10 rounded-full animate-spin" style={{ borderTopColor: "#E11D48" }} />
+            </div>
+          ) : (
+            <div className="divide-y" style={{ divideColor: "rgba(255,255,255,0.05)" }}>
+              {contactsList.map(ct => (
+                <div key={ct.id} className="px-5 py-4">
+                  {editingContact === ct.id ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="font-semibold text-white text-sm">{ct.full_name}</div>
+                        <span className="text-xs px-2 py-0.5 rounded-full"
+                          style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
+                          {ct.role_code}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>📱 Телефон (для SMS)</label>
+                          <input
+                            defaultValue={ct.phone || ""}
+                            onChange={e => setContactBuf(b => ({ ...b, phone: e.target.value }))}
+                            placeholder="+79001234567"
+                            className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
+                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>📧 Email</label>
+                          <input
+                            defaultValue={ct.email || ""}
+                            onChange={e => setContactBuf(b => ({ ...b, email: e.target.value }))}
+                            placeholder="example@company.ru"
+                            className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
+                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>🏢 Битрикс24 ID пользователя</label>
+                          <input
+                            type="number"
+                            defaultValue={ct.bitrix_user_id || ""}
+                            onChange={e => setContactBuf(b => ({ ...b, bitrix_user_id: e.target.value ? +e.target.value : null }))}
+                            placeholder="Например: 42"
+                            className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
+                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                          <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+                            Найти в Битриксе: Сотрудники → профиль → цифра в URL (?ID=42)
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>🔔 Каналы уведомлений</label>
+                          <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox"
+                                defaultChecked={ct.notify_sms !== false}
+                                onChange={e => setContactBuf(b => ({ ...b, notify_sms: e.target.checked }))}
+                                className="w-4 h-4 rounded" />
+                              <span className="text-sm text-white">SMS уведомления</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox"
+                                defaultChecked={ct.notify_bitrix !== false}
+                                onChange={e => setContactBuf(b => ({ ...b, notify_bitrix: e.target.checked }))}
+                                className="w-4 h-4 rounded" />
+                              <span className="text-sm text-white">Задачи в Битрикс24</span>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => saveContact(ct.id)} disabled={savingContact}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold"
+                          style={{ background: "#E11D48", color: "#fff" }}>
+                          <Icon name={savingContact ? "Loader" : "Save"} size={13} className={savingContact ? "animate-spin" : ""} />
+                          Сохранить
+                        </button>
+                        <button onClick={() => { setEditingContact(null); setContactBuf({}); }}
+                          className="px-4 py-2 rounded-xl text-sm"
+                          style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                          Отмена
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-white text-sm">{ct.full_name}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full"
+                            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
+                            {ct.role_code}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                          <span className="flex items-center gap-1">
+                            <Icon name="Phone" size={11} />
+                            {ct.phone || <span style={{ color: "rgba(255,100,100,0.6)" }}>не указан</span>}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Icon name="Building2" size={11} />
+                            {ct.bitrix_user_id ? `Битрикс ID: ${ct.bitrix_user_id}` : <span style={{ color: "rgba(255,100,100,0.6)" }}>Битрикс не привязан</span>}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {ct.notify_sms && <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: "rgba(0,255,136,0.1)", color: "var(--neon-green)" }}>SMS</span>}
+                            {ct.notify_bitrix && <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)" }}>Битрикс</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <button onClick={() => { setEditingContact(ct.id); setContactBuf({ phone: ct.phone, email: ct.email, bitrix_user_id: ct.bitrix_user_id, notify_sms: ct.notify_sms, notify_bitrix: ct.notify_bitrix }); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:scale-105"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                        <Icon name="Pencil" size={12} />
+                        Изменить
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {contactsList.length === 0 && (
+                <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  Список пуст. Нажмите «Обновить»
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Подсказка Битрикс */}
+          <div className="px-5 py-3 flex items-start gap-2"
+            style={{ borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(0,212,255,0.03)" }}>
+            <Icon name="Info" size={13} style={{ color: "rgba(0,212,255,0.5)", marginTop: 1, flexShrink: 0 }} />
+            <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+              <span style={{ color: "rgba(0,212,255,0.7)" }}>Как найти Битрикс24 ID:</span> откройте профиль сотрудника в Битриксе → 
+              в адресной строке будет <code style={{ color: "rgba(255,255,255,0.5)" }}>?ID=42</code> — это и есть ID.
+              Снабженцы получают задачу как ответственные, руководители (admin/manager) — как наблюдатели.
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Модалка сброса пароля */}
