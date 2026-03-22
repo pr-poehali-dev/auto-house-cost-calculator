@@ -12,6 +12,7 @@ export interface VorRow {
   qty: number;
   note?: string;
   is_work: boolean; // true = работа, false = материал
+  price_per_unit?: number; // цена за единицу (необязательное, вводится вручную)
 }
 
 // ─── Типы элементов ───────────────────────────────────────────────────────────
@@ -1130,6 +1131,236 @@ function PlacedCard({
   );
 }
 
+// ─── Полная ВОР со сметой ─────────────────────────────────────────────────────
+
+function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }
+
+function FullVorTable({ rows, onPriceChange }: {
+  rows: VorRow[];
+  onPriceChange: (id: string, price: number) => void;
+}) {
+  const [showPrices, setShowPrices] = useState(true);
+  const sections = [...new Set(rows.map(r => r.section))];
+
+  const totalMat = rows.filter(r => !r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+  const totalWork = rows.filter(r => r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+  const totalAll = totalMat + totalWork;
+  const hasPrices = rows.some(r => (r.price_per_unit || 0) > 0);
+
+  const inp = "w-full px-2 py-1 rounded-lg text-xs text-right text-white outline-none font-mono";
+  const inpSty = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" };
+
+  return (
+    <div className="rounded-2xl overflow-hidden mt-6" style={{ border: "1px solid rgba(0,255,136,0.2)" }}>
+      {/* Заголовок */}
+      <div className="flex items-center justify-between px-5 py-4"
+        style={{ background: "linear-gradient(135deg, rgba(0,255,136,0.08), rgba(0,212,255,0.05))", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: "rgba(0,255,136,0.15)" }}>
+            <Icon name="FileSpreadsheet" size={18} style={{ color: "#00FF88" }} />
+          </div>
+          <div>
+            <div className="font-display font-bold text-white text-base">Ведомость объёмов работ</div>
+            <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+              {rows.length} позиций · {rows.filter(r => !r.is_work).length} материалов · {rows.filter(r => r.is_work).length} работ
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {hasPrices && (
+            <div className="text-right">
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Итого смета</div>
+              <div className="font-display font-bold text-lg" style={{ color: "#00FF88" }}>{fmt(totalAll)} ₽</div>
+            </div>
+          )}
+          <button onClick={() => setShowPrices(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+            style={{
+              background: showPrices ? "rgba(0,255,136,0.15)" : "rgba(255,255,255,0.06)",
+              color: showPrices ? "#00FF88" : "rgba(255,255,255,0.5)",
+              border: `1px solid ${showPrices ? "rgba(0,255,136,0.3)" : "rgba(255,255,255,0.1)"}`,
+            }}>
+            <Icon name={showPrices ? "EyeOff" : "Eye"} size={12} />
+            {showPrices ? "Скрыть цены" : "Ввести цены"}
+          </button>
+        </div>
+      </div>
+
+      {/* Таблица по разделам */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+              <th className="text-left px-4 py-2.5 font-semibold uppercase tracking-wide w-8" style={{ color: "rgba(255,255,255,0.3)" }}>№</th>
+              <th className="text-left px-3 py-2.5 font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.3)" }}>Наименование</th>
+              <th className="text-center px-2 py-2.5 font-semibold uppercase tracking-wide w-14" style={{ color: "rgba(255,255,255,0.3)" }}>Ед.</th>
+              <th className="text-right px-3 py-2.5 font-semibold uppercase tracking-wide w-20" style={{ color: "rgba(255,255,255,0.3)" }}>Кол-во</th>
+              {showPrices && <>
+                <th className="text-right px-3 py-2.5 font-semibold uppercase tracking-wide w-28" style={{ color: "rgba(255,255,255,0.3)" }}>Цена/ед., ₽</th>
+                <th className="text-right px-4 py-2.5 font-semibold uppercase tracking-wide w-28" style={{ color: "rgba(255,255,255,0.3)" }}>Сумма, ₽</th>
+              </>}
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map(sec => {
+              const secRows = rows.filter(r => r.section === sec);
+              const secMat = secRows.filter(r => !r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+              const secWork = secRows.filter(r => r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+              const secTotal = secMat + secWork;
+              let rowNum = 0;
+              return (
+                <>
+                  {/* Заголовок раздела */}
+                  <tr key={`sec-${sec}`} style={{ background: "rgba(255,255,255,0.04)", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                    <td colSpan={showPrices ? 4 : 4} className="px-4 py-2">
+                      <span className="font-bold text-white uppercase tracking-wide text-xs">{sec}</span>
+                    </td>
+                    {showPrices && (
+                      <td colSpan={2} className="px-4 py-2 text-right">
+                        {secTotal > 0 && (
+                          <span className="font-semibold text-xs" style={{ color: "#FBBF24" }}>{fmt(secTotal)} ₽</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+
+                  {/* Материалы раздела */}
+                  {secRows.filter(r => !r.is_work).length > 0 && (
+                    <tr style={{ background: "rgba(0,212,255,0.03)" }}>
+                      <td colSpan={showPrices ? 6 : 4} className="px-4 py-1.5">
+                        <span className="text-xs font-semibold" style={{ color: "#00D4FF" }}>Материалы</span>
+                      </td>
+                    </tr>
+                  )}
+                  {secRows.filter(r => !r.is_work).map(r => {
+                    rowNum++;
+                    const total = r.qty * (r.price_per_unit || 0);
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.03)" }}>
+                        <td className="px-4 py-2 font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>{rowNum}</td>
+                        <td className="px-3 py-2 text-white">
+                          {r.name}
+                          {r.note && <span className="ml-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>({r.note})</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center" style={{ color: "rgba(255,255,255,0.45)" }}>{r.unit}</td>
+                        <td className="px-3 py-2 text-right font-semibold font-mono" style={{ color: "#00D4FF" }}>
+                          {r.qty % 1 === 0 ? r.qty : r.qty.toFixed(3)}
+                        </td>
+                        {showPrices && <>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={r.price_per_unit || ""}
+                              onChange={e => onPriceChange(r.id, +e.target.value)}
+                              placeholder="0"
+                              className={inp} style={inpSty}
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-right font-semibold font-mono" style={{ color: total > 0 ? "#00D4FF" : "rgba(255,255,255,0.15)" }}>
+                            {total > 0 ? fmt(total) : "—"}
+                          </td>
+                        </>}
+                      </tr>
+                    );
+                  })}
+
+                  {/* Работы раздела */}
+                  {secRows.filter(r => r.is_work).length > 0 && (
+                    <tr style={{ background: "rgba(255,107,26,0.03)" }}>
+                      <td colSpan={showPrices ? 6 : 4} className="px-4 py-1.5">
+                        <span className="text-xs font-semibold" style={{ color: "#FF6B1A" }}>Работы</span>
+                      </td>
+                    </tr>
+                  )}
+                  {secRows.filter(r => r.is_work).map(r => {
+                    rowNum++;
+                    const total = r.qty * (r.price_per_unit || 0);
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.03)" }}>
+                        <td className="px-4 py-2 font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>{rowNum}</td>
+                        <td className="px-3 py-2 text-white">
+                          {r.name}
+                          {r.note && <span className="ml-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>({r.note})</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center" style={{ color: "rgba(255,255,255,0.45)" }}>{r.unit}</td>
+                        <td className="px-3 py-2 text-right font-semibold font-mono" style={{ color: "#FF6B1A" }}>
+                          {r.qty % 1 === 0 ? r.qty : r.qty.toFixed(3)}
+                        </td>
+                        {showPrices && <>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={r.price_per_unit || ""}
+                              onChange={e => onPriceChange(r.id, +e.target.value)}
+                              placeholder="0"
+                              className={inp} style={inpSty}
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-right font-semibold font-mono" style={{ color: total > 0 ? "#FF6B1A" : "rgba(255,255,255,0.15)" }}>
+                            {total > 0 ? fmt(total) : "—"}
+                          </td>
+                        </>}
+                      </tr>
+                    );
+                  })}
+
+                  {/* Подитог раздела */}
+                  {showPrices && secTotal > 0 && (
+                    <tr key={`sub-${sec}`} style={{ background: "rgba(251,191,36,0.05)", borderTop: "1px solid rgba(251,191,36,0.15)" }}>
+                      <td colSpan={4} className="px-4 py-2 text-xs font-semibold" style={{ color: "rgba(255,255,255,0.4)" }}>
+                        Итого по разделу «{sec}»
+                        {secMat > 0 && <span className="ml-2" style={{ color: "#00D4FF" }}>мат: {fmt(secMat)} ₽</span>}
+                        {secWork > 0 && <span className="ml-2" style={{ color: "#FF6B1A" }}>раб: {fmt(secWork)} ₽</span>}
+                      </td>
+                      <td />
+                      <td className="px-4 py-2 text-right font-display font-bold text-sm" style={{ color: "#FBBF24" }}>
+                        {fmt(secTotal)} ₽
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Итоговая смета */}
+      {showPrices && (
+        <div className="border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          <div className="px-5 py-4 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ background: "#00D4FF" }} />
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>Итого материалы</span>
+              </div>
+              <span className="font-semibold font-mono" style={{ color: hasPrices ? "#00D4FF" : "rgba(255,255,255,0.2)" }}>
+                {hasPrices ? `${fmt(totalMat)} ₽` : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ background: "#FF6B1A" }} />
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>Итого работы</span>
+              </div>
+              <span className="font-semibold font-mono" style={{ color: hasPrices ? "#FF6B1A" : "rgba(255,255,255,0.2)" }}>
+                {hasPrices ? `${fmt(totalWork)} ₽` : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <span className="font-display font-bold text-white text-base">ИТОГО ПО СМЕТЕ</span>
+              <span className="font-display font-black text-xl" style={{ color: hasPrices ? "#00FF88" : "rgba(255,255,255,0.2)" }}>
+                {hasPrices ? `${fmt(totalAll)} ₽` : "Введите цены →"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Главный компонент ────────────────────────────────────────────────────────
 
 export default function ElementsCalcTab({
@@ -1186,7 +1417,21 @@ export default function ElementsCalcTab({
 
   // Сводная ВОР: если у элемента есть кастомный vor — используем его, иначе считаем из параметров
   const allVor: VorRow[] = placed.flatMap(el => el.vor.length > 0 ? el.vor : calcVor(el.kind, el.params));
-  const sections = [...new Set(allVor.map(r => r.section))];
+
+  // Обновить цену строки в ВОР — сохраняем в overrideVor элемента
+  const handlePriceChange = (rowId: string, price: number) => {
+    // Находим элемент которому принадлежит строка
+    const el = placed.find(e => {
+      const rows = e.vor.length > 0 ? e.vor : calcVor(e.kind, e.params);
+      return rows.some(r => r.id === rowId);
+    });
+    if (!el) return;
+    // Если кастомный vor уже есть — обновляем в нём
+    // Иначе копируем рассчитанный и ставим цену
+    const baseRows = el.vor.length > 0 ? el.vor : calcVor(el.kind, el.params);
+    const updated = baseRows.map(r => r.id === rowId ? { ...r, price_per_unit: price } : r);
+    overrideVor(el.id, updated);
+  };
 
   // Группы библиотеки
   const groups = GROUP_ORDER.map(g => ({ group: g, items: LIBRARY.filter(l => l.group === g) }));
@@ -1310,57 +1555,9 @@ export default function ElementsCalcTab({
                 </div>
               )}
 
-              {/* Сводная ВОР */}
+              {/* Полная ВОР со сметой */}
               {allVor.length > 0 && (
-                <div className="rounded-2xl p-5 mt-4" style={{ background: "rgba(0,255,136,0.04)", border: "1px solid rgba(0,255,136,0.15)" }}>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Icon name="FileSpreadsheet" size={16} style={{ color: "#00FF88" }} />
-                    <span className="font-semibold text-white text-sm">Сводная ведомость объёмов работ</span>
-                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(0,255,136,0.1)", color: "#00FF88" }}>
-                      {allVor.length} позиций
-                    </span>
-                  </div>
-                  {sections.map(sec => {
-                    const rows = allVor.filter(r => r.section === sec);
-                    return (
-                      <div key={sec} className="mb-4">
-                        <div className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>{sec}</div>
-                        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                                <th className="text-left px-3 py-2 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Наименование</th>
-                                <th className="text-center px-2 py-2 font-medium w-16" style={{ color: "rgba(255,255,255,0.35)" }}>Ед.</th>
-                                <th className="text-right px-3 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.35)" }}>Кол-во</th>
-                                <th className="text-center px-2 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.35)" }}>Тип</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map(r => (
-                                <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                                  <td className="px-3 py-2 text-white">
-                                    {r.name}
-                                    {r.note && <span className="ml-1" style={{ color: "rgba(255,255,255,0.35)" }}>({r.note})</span>}
-                                  </td>
-                                  <td className="px-2 py-2 text-center" style={{ color: "rgba(255,255,255,0.4)" }}>{r.unit}</td>
-                                  <td className="px-3 py-2 text-right font-semibold font-mono" style={{ color: r.is_work ? "#FF6B1A" : "#00D4FF" }}>
-                                    {r.qty % 1 === 0 ? r.qty : r.qty.toFixed(3)}
-                                  </td>
-                                  <td className="px-2 py-2 text-center">
-                                    <span className="px-1.5 py-0.5 rounded text-xs" style={{
-                                      background: r.is_work ? "rgba(255,107,26,0.12)" : "rgba(0,212,255,0.1)",
-                                      color: r.is_work ? "#FF6B1A" : "#00D4FF",
-                                    }}>{r.is_work ? "Работа" : "Матер."}</span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <FullVorTable rows={allVor} onPriceChange={handlePriceChange} />
               )}
             </>
           )}
