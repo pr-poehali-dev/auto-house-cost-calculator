@@ -1504,9 +1504,677 @@ function HistoryTab({ order, token, onRefresh }: { order: Order; token: string; 
   );
 }
 
+// ─── CRM URL ──────────────────────────────────────────────────────────────────
+const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
+
+// ─── CRM Types ────────────────────────────────────────────────────────────────
+interface Lead {
+  id: number; name: string; phone: string | null; email: string | null;
+  source_id: number | null; source_name: string | null; source_detail: string | null;
+  stage: string; stage_label: string; stage_changed_at: string | null;
+  rejected_reason: string | null;
+  family_size: number | null; living_type: string | null;
+  area_desired: number | null; floors_desired: number | null; rooms_desired: number | null;
+  extra_rooms: string | null; wall_material_pref: string | null;
+  has_land: boolean | null; land_location: string | null;
+  budget: number | null; payment_type: string | null; start_date_plan: string | null;
+  project_id: number | null; project_name: string | null;
+  assigned_to: number | null; assigned_name: string | null;
+  created_by: number | null; created_by_name: string | null;
+  created_at: string; updated_at: string; next_contact_at: string | null;
+  events?: LeadEventCrm[];
+}
+
+interface LeadEventCrm {
+  id: number; type: string; content: string;
+  old_stage: string | null; new_stage: string | null;
+  created_at: string; by: string | null;
+}
+
+interface LeadSource { id: number; name: string; type: string; }
+
+const CRM_STAGES = [
+  { id: "new",          label: "Новый лид",           color: "#6B7280",  icon: "Inbox" },
+  { id: "call_planned", label: "Звонок",               color: "#00D4FF",  icon: "Phone" },
+  { id: "qualified",    label: "Квалифицирован",       color: "#A855F7",  icon: "UserCheck" },
+  { id: "kp_sent",      label: "КП отправлено",        color: "#FBBF24",  icon: "FileText" },
+  { id: "meeting",      label: "Встреча",              color: "#FF6B1A",  icon: "Users" },
+  { id: "contract",     label: "Договор",              color: "#0EA5E9",  icon: "FileSignature" },
+  { id: "in_work",      label: "В работе",             color: "#00FF88",  icon: "Hammer" },
+  { id: "done",         label: "Сдан",                 color: "#22c55e",  icon: "CheckCircle" },
+  { id: "rejected",     label: "Отказ",                color: "#ef4444",  icon: "XCircle" },
+];
+
+const SCRIPT_STEPS = [
+  { step: 0, title: "Подготовка", color: "#6B7280", text: "Изучи источник лида. Держи под рукой: каталог проектов, прайс-лист, калькулятор." },
+  { step: 1, title: "Приветствие", color: "#00D4FF", text: "«Добрый день, [Имя]! Меня зовут [Ваше имя], компания ТГВ-Строй. Вы оставляли заявку на расчёт стоимости дома. Удобно говорить? Займу 5-7 минут.»" },
+  { step: 2, title: "Потребности", color: "#A855F7", text: "«Расскажите, какой дом ищете? Для кого строим? Постоянное проживание или дача? Площадь, этажей, спален? Участок есть?»" },
+  { step: 3, title: "Бюджет", color: "#FBBF24", text: "«На какой бюджет рассчитываете? Наличные или ипотека? Мы помогаем с одобрением по льготным программам. Когда планируете начать?»" },
+  { step: 4, title: "Презентация", color: "#FF6B1A", text: "«Основываясь на вашем запросе — у нас есть идеальный проект [название]. [Связать характеристики с выгодами]. Фиксируем цену в договоре — вы защищены от подорожания.»" },
+  { step: 5, title: "Закрытие", color: "#00FF88", text: "«Отправлю планировку и расчёт в 3 комплектациях. Когда удобнее встретиться: в субботу в 12:00 или в понедельник в 18:00?»" },
+];
+
+// ─── CRM Lead Card ────────────────────────────────────────────────────────────
+function CrmLeadCard({ lead, onClick }: { lead: Lead; onClick: () => void }) {
+  const stage = CRM_STAGES.find(s => s.id === lead.stage) || CRM_STAGES[0];
+  const isOverdue = lead.next_contact_at && new Date(lead.next_contact_at) < new Date();
+  return (
+    <div onClick={onClick} className="rounded-xl p-3 cursor-pointer transition-all hover:scale-[1.02]"
+      style={{ background: "var(--card-bg)", border: `1px solid ${isOverdue ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.07)"}` }}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="font-semibold text-sm text-white truncate">{lead.name}</div>
+        {lead.budget && <span className="text-xs font-mono flex-shrink-0" style={{ color: "#FBBF24" }}>{fmt(lead.budget)} ₽</span>}
+      </div>
+      {lead.phone && (
+        <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <Icon name="Phone" size={10} />{lead.phone}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {lead.source_name && (
+          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(0,212,255,0.1)", color: "#00D4FF" }}>
+            {lead.source_name}
+          </span>
+        )}
+        {lead.area_desired && <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>{lead.area_desired} м²</span>}
+        {lead.next_contact_at && (
+          <span className="text-xs ml-auto" style={{ color: isOverdue ? "#ef4444" : "rgba(255,255,255,0.3)" }}>
+            <Icon name="Clock" size={10} style={{ display: "inline", marginRight: 2 }} />
+            {new Date(lead.next_contact_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CRM Lead Modal ───────────────────────────────────────────────────────────
+function CrmLeadModal({ lead, token, sources, onClose, onUpdated }: {
+  lead: Lead; token: string; sources: LeadSource[];
+  onClose: () => void; onUpdated: () => void;
+}) {
+  const [tab, setTab] = useState<"info" | "qualify" | "script" | "history">("info");
+  const [editMode, setEditMode] = useState(false);
+  const [buf, setBuf] = useState<Partial<Lead>>({});
+  const [saving, setSaving] = useState(false);
+  const [comment, setComment] = useState("");
+  const [addingComment, setAddingComment] = useState(false);
+  const [scriptStep, setScriptStep] = useState(0);
+  const [fullLead, setFullLead] = useState<Lead>(lead);
+
+  useEffect(() => {
+    apiFetch(`${CRM_URL}?action=get&lead_id=${lead.id}`, {}, token).then(r => {
+      if (r.lead) setFullLead(r.lead);
+    });
+  }, [lead.id, token]);
+
+  const save = async () => {
+    setSaving(true);
+    await apiFetch(`${CRM_URL}?action=update`, { method: "POST", body: JSON.stringify({ lead_id: lead.id, ...buf }) }, token);
+    setSaving(false); setEditMode(false); setBuf({});
+    onUpdated();
+    apiFetch(`${CRM_URL}?action=get&lead_id=${lead.id}`, {}, token).then(r => { if (r.lead) setFullLead(r.lead); });
+  };
+
+  const setStage = async (stage: string) => {
+    await apiFetch(`${CRM_URL}?action=set_stage`, { method: "POST", body: JSON.stringify({ lead_id: lead.id, stage }) }, token);
+    setFullLead(prev => ({ ...prev, stage }));
+    onUpdated();
+  };
+
+  const addComment = async () => {
+    if (!comment.trim()) return;
+    setAddingComment(true);
+    await apiFetch(`${CRM_URL}?action=add_event`, { method: "POST", body: JSON.stringify({ lead_id: lead.id, type: "comment", content: comment }) }, token);
+    setComment(""); setAddingComment(false);
+    apiFetch(`${CRM_URL}?action=get&lead_id=${lead.id}`, {}, token).then(r => { if (r.lead) setFullLead(r.lead); });
+  };
+
+  const stage = CRM_STAGES.find(s => s.id === fullLead.stage) || CRM_STAGES[0];
+  const inp = "w-full px-3 py-2 rounded-xl text-sm text-white outline-none";
+  const inpS = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-4 px-4 pb-4 overflow-y-auto"
+      style={{ background: "rgba(0,0,0,0.7)" }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-2xl rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.1)" }}>
+
+        {/* Шапка */}
+        <div className="px-5 py-4 flex items-start gap-3"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", background: `${stage.color}11` }}>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-lg text-white">{fullLead.name}</div>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: `${stage.color}22`, color: stage.color }}>
+                {stage.label}
+              </span>
+              {fullLead.phone && <span className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>{fullLead.phone}</span>}
+              {fullLead.source_name && <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>· {fullLead.source_name}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10"
+            style={{ color: "rgba(255,255,255,0.4)" }}>
+            <Icon name="X" size={16} />
+          </button>
+        </div>
+
+        {/* Этапы */}
+        <div className="px-5 py-3 flex gap-1 overflow-x-auto" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          {CRM_STAGES.filter(s => s.id !== "rejected").map(s => (
+            <button key={s.id} onClick={() => setStage(s.id)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0 transition-all"
+              style={{
+                background: fullLead.stage === s.id ? `${s.color}22` : "rgba(255,255,255,0.04)",
+                color: fullLead.stage === s.id ? s.color : "rgba(255,255,255,0.35)",
+                border: fullLead.stage === s.id ? `1px solid ${s.color}44` : "1px solid transparent",
+              }}>
+              {s.label}
+            </button>
+          ))}
+          <button onClick={() => setStage("rejected")}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0"
+            style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444" }}>
+            Отказ
+          </button>
+        </div>
+
+        {/* Вкладки */}
+        <div className="flex gap-1 px-5 pt-3">
+          {([["info","Контакт","User"],["qualify","Квалификация","ClipboardList"],["script","Скрипт","MessageCircle"],["history","История","Clock"]] as const).map(([id, label, icon]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{ background: tab === id ? "rgba(255,107,26,0.15)" : "transparent", color: tab === id ? "var(--neon-orange)" : "rgba(255,255,255,0.4)" }}>
+              <Icon name={icon} size={12} />{label}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 py-4">
+
+          {/* Контакт */}
+          {tab === "info" && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                {[["name","Имя","text"],["phone","Телефон","tel"],["email","Email","email"]].map(([k,l,t]) => (
+                  <div key={k} className={k === "name" ? "col-span-2" : ""}>
+                    <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
+                    {editMode ? (
+                      <input type={t} defaultValue={(fullLead as Record<string,unknown>)[k] as string || ""}
+                        onChange={e => setBuf(b => ({ ...b, [k]: e.target.value }))}
+                        className={inp} style={inpS} />
+                    ) : (
+                      <div className="text-sm text-white px-1">{(fullLead as Record<string,unknown>)[k] as string || <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}</div>
+                    )}
+                  </div>
+                ))}
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Источник</label>
+                  {editMode ? (
+                    <select defaultValue={fullLead.source_id || ""} onChange={e => setBuf(b => ({ ...b, source_id: e.target.value ? +e.target.value : null }))}
+                      className={inp} style={{ ...inpS, background: "#1a1f2e" }}>
+                      <option value="">— выбрать —</option>
+                      {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  ) : (
+                    <div className="text-sm text-white px-1">{fullLead.source_name || <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}</div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Бюджет (₽)</label>
+                  {editMode ? (
+                    <input type="number" defaultValue={fullLead.budget || ""}
+                      onChange={e => setBuf(b => ({ ...b, budget: e.target.value ? +e.target.value : null }))}
+                      className={inp} style={inpS} />
+                  ) : (
+                    <div className="text-sm font-mono px-1" style={{ color: "#FBBF24" }}>
+                      {fullLead.budget ? fmt(fullLead.budget) + " ₽" : <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Следующий контакт</label>
+                  {editMode ? (
+                    <input type="datetime-local" defaultValue={fullLead.next_contact_at?.slice(0,16) || ""}
+                      onChange={e => setBuf(b => ({ ...b, next_contact_at: e.target.value || null }))}
+                      className={inp} style={inpS} />
+                  ) : (
+                    <div className="text-sm px-1" style={{ color: fullLead.next_contact_at && new Date(fullLead.next_contact_at) < new Date() ? "#ef4444" : "rgba(255,255,255,0.6)" }}>
+                      {fullLead.next_contact_at ? new Date(fullLead.next_contact_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                {editMode ? (
+                  <>
+                    <button onClick={save} disabled={saving}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold"
+                      style={{ background: "var(--neon-orange)", color: "#fff" }}>
+                      <Icon name={saving ? "Loader" : "Save"} size={13} className={saving ? "animate-spin" : ""} />
+                      Сохранить
+                    </button>
+                    <button onClick={() => { setEditMode(false); setBuf({}); }}
+                      className="px-4 py-2 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                      Отмена
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => setEditMode(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                    <Icon name="Pencil" size={12} /> Редактировать
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Квалификация */}
+          {tab === "qualify" && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  ["area_desired","Площадь (м²)","number"],
+                  ["floors_desired","Этажей","number"],
+                  ["rooms_desired","Спален","number"],
+                  ["family_size","Кол-во жильцов","number"],
+                  ["start_date_plan","Срок начала","text"],
+                  ["wall_material_pref","Предпочтения по материалу","text"],
+                ].map(([k,l,t]) => (
+                  <div key={k} className={["wall_material_pref","extra_rooms"].includes(k) ? "col-span-3" : ""}>
+                    <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
+                    <input type={t} defaultValue={(fullLead as Record<string,unknown>)[k] as string || ""}
+                      onChange={e => setBuf(b => ({ ...b, [k]: t === "number" && e.target.value ? +e.target.value : e.target.value || null }))}
+                      className={inp} style={inpS} />
+                  </div>
+                ))}
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Тип проживания</label>
+                  <select defaultValue={fullLead.living_type || ""} onChange={e => setBuf(b => ({ ...b, living_type: e.target.value || null }))}
+                    className={inp} style={{ ...inpS, background: "#1a1f2e" }}>
+                    <option value="">— выбрать —</option>
+                    <option value="permanent">Постоянное</option>
+                    <option value="seasonal">Сезонное / дача</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Способ оплаты</label>
+                  <select defaultValue={fullLead.payment_type || ""} onChange={e => setBuf(b => ({ ...b, payment_type: e.target.value || null }))}
+                    className={inp} style={{ ...inpS, background: "#1a1f2e" }}>
+                    <option value="">— выбрать —</option>
+                    <option value="cash">Наличные / перевод</option>
+                    <option value="mortgage">Ипотека</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 col-span-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-white">
+                    <input type="checkbox" defaultChecked={!!fullLead.has_land}
+                      onChange={e => setBuf(b => ({ ...b, has_land: e.target.checked }))}
+                      className="w-4 h-4 rounded" />
+                    Участок есть
+                  </label>
+                </div>
+                {(fullLead.has_land || buf.has_land) && (
+                  <div className="col-span-2">
+                    <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Где участок</label>
+                    <input defaultValue={fullLead.land_location || ""} onChange={e => setBuf(b => ({ ...b, land_location: e.target.value }))}
+                      className={inp} style={inpS} />
+                  </div>
+                )}
+                <div className="col-span-3">
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Нужные помещения (терраса, гараж, кабинет...)</label>
+                  <input defaultValue={fullLead.extra_rooms || ""} onChange={e => setBuf(b => ({ ...b, extra_rooms: e.target.value }))}
+                    className={inp} style={inpS} />
+                </div>
+              </div>
+              <button onClick={save} disabled={saving}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+                <Icon name={saving ? "Loader" : "Save"} size={13} className={saving ? "animate-spin" : ""} />
+                Сохранить квалификацию
+              </button>
+            </div>
+          )}
+
+          {/* Скрипт */}
+          {tab === "script" && (
+            <div>
+              <div className="flex gap-1 mb-4 overflow-x-auto">
+                {SCRIPT_STEPS.map((s, i) => (
+                  <button key={i} onClick={() => setScriptStep(i)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium flex-shrink-0 transition-all"
+                    style={{
+                      background: scriptStep === i ? `${s.color}22` : "rgba(255,255,255,0.04)",
+                      color: scriptStep === i ? s.color : "rgba(255,255,255,0.4)",
+                      border: scriptStep === i ? `1px solid ${s.color}44` : "1px solid transparent",
+                    }}>
+                    {i}. {s.title}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-xl p-4 mb-4" style={{ background: `${SCRIPT_STEPS[scriptStep].color}11`, border: `1px solid ${SCRIPT_STEPS[scriptStep].color}33` }}>
+                <div className="text-sm font-semibold mb-2" style={{ color: SCRIPT_STEPS[scriptStep].color }}>
+                  Этап {scriptStep}: {SCRIPT_STEPS[scriptStep].title}
+                </div>
+                <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>
+                  {SCRIPT_STEPS[scriptStep].text}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {scriptStep > 0 && (
+                  <button onClick={() => setScriptStep(s => s - 1)}
+                    className="px-3 py-1.5 rounded-lg text-xs" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                    ← Назад
+                  </button>
+                )}
+                {scriptStep < SCRIPT_STEPS.length - 1 && (
+                  <button onClick={() => setScriptStep(s => s + 1)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                    style={{ background: `${SCRIPT_STEPS[scriptStep + 1].color}22`, color: SCRIPT_STEPS[scriptStep + 1].color }}>
+                    Далее: {SCRIPT_STEPS[scriptStep + 1].title} →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* История */}
+          {tab === "history" && (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input value={comment} onChange={e => setComment(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addComment()}
+                  placeholder="Добавить комментарий..."
+                  className="flex-1 px-3 py-2 rounded-xl text-sm text-white outline-none"
+                  style={inpS} />
+                <button onClick={addComment} disabled={addingComment || !comment.trim()}
+                  className="px-3 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+                  style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)" }}>
+                  <Icon name={addingComment ? "Loader" : "Send"} size={14} className={addingComment ? "animate-spin" : ""} />
+                </button>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {(fullLead.events || []).map(e => (
+                  <div key={e.id} className="flex gap-2.5 text-xs px-3 py-2 rounded-xl"
+                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <div className="flex-shrink-0 mt-0.5">
+                      {e.type === "stage_change" ? <Icon name="ArrowRight" size={12} style={{ color: "#FBBF24" }} /> :
+                       e.type === "created" ? <Icon name="Plus" size={12} style={{ color: "#00FF88" }} /> :
+                       <Icon name="MessageSquare" size={12} style={{ color: "#00D4FF" }} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div style={{ color: "rgba(255,255,255,0.7)" }}>{e.content}</div>
+                      <div className="mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
+                        {e.by} · {new Date(e.created_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {(fullLead.events || []).length === 0 && (
+                  <div className="text-center py-4 text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>История пуста</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CRM Kanban ───────────────────────────────────────────────────────────────
+function CrmKanban({ user, token }: { user: { id: number; full_name: string; role_code: string }; token: string }) {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [sources, setSources] = useState<LeadSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [view, setView] = useState<"kanban" | "list">("kanban");
+  const [stageFilter, setStageFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [stats, setStats] = useState<Record<string,number>>({});
+
+  // Новый лид
+  const [newForm, setNewForm] = useState({ name: "", phone: "", email: "", source_id: "", stage: "new" });
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [lr, sr, cr] = await Promise.all([
+      apiFetch(`${CRM_URL}?action=list`, {}, token),
+      apiFetch(`${CRM_URL}?action=sources`, {}, token),
+      apiFetch(`${CRM_URL}?action=kanban_counts`, {}, token),
+    ]);
+    setLeads(lr.leads || []);
+    setSources(sr.sources || []);
+    setStats(cr.counts || {});
+    setLoading(false);
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createLead = async () => {
+    if (!newForm.name.trim()) return;
+    setCreating(true);
+    const r = await apiFetch(`${CRM_URL}?action=create`, {
+      method: "POST",
+      body: JSON.stringify({ ...newForm, source_id: newForm.source_id ? +newForm.source_id : null }),
+    }, token);
+    setCreating(false);
+    if (r.ok) { setShowCreate(false); setNewForm({ name:"",phone:"",email:"",source_id:"",stage:"new" }); load(); }
+  };
+
+  const filtered = leads.filter(l => {
+    const matchStage = stageFilter === "all" || l.stage === stageFilter;
+    const matchSearch = !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.phone || "").includes(search);
+    return matchStage && matchSearch;
+  });
+
+  const inp = "w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none";
+  const inpS = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" };
+
+  return (
+    <div className="space-y-4">
+      {/* Шапка */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-white">CRM — Воронка продаж</h2>
+          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+            {leads.length} лидов · {stats["done"] || 0} сдано · конверсия {leads.length ? Math.round((stats["done"] || 0) / leads.length * 100) : 0}%
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex p-0.5 rounded-lg" style={{ background: "rgba(255,255,255,0.05)" }}>
+            <button onClick={() => setView("kanban")} className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              style={{ background: view === "kanban" ? "rgba(255,107,26,0.2)" : "transparent", color: view === "kanban" ? "var(--neon-orange)" : "rgba(255,255,255,0.4)" }}>
+              <Icon name="LayoutDashboard" size={13} />
+            </button>
+            <button onClick={() => setView("list")} className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              style={{ background: view === "list" ? "rgba(255,107,26,0.2)" : "transparent", color: view === "list" ? "var(--neon-orange)" : "rgba(255,255,255,0.4)" }}>
+              <Icon name="List" size={13} />
+            </button>
+          </div>
+          <button onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{ background: "var(--neon-orange)", color: "#fff" }}>
+            <Icon name="Plus" size={14} /> Новый лид
+          </button>
+        </div>
+      </div>
+
+      {/* Поиск */}
+      <div className="relative">
+        <Icon name="Search" size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.3)" }} />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по имени или телефону..."
+          className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
+          style={inpS} />
+      </div>
+
+      {/* Стат-карточки */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Новых за неделю", value: leads.filter(l => new Date(l.created_at) > new Date(Date.now() - 7*86400000)).length, color: "#00D4FF", icon: "TrendingUp" },
+          { label: "Активных", value: leads.filter(l => !["done","rejected"].includes(l.stage)).length, color: "#FBBF24", icon: "Activity" },
+          { label: "Просроченных", value: leads.filter(l => l.next_contact_at && new Date(l.next_contact_at) < new Date() && !["done","rejected"].includes(l.stage)).length, color: "#ef4444", icon: "AlertCircle" },
+          { label: "Сдано", value: stats["done"] || 0, color: "#00FF88", icon: "CheckCircle" },
+        ].map(s => (
+          <div key={s.label} className="rounded-xl p-3 flex items-center gap-3" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${s.color}18` }}>
+              <Icon name={s.icon} size={15} style={{ color: s.color }} />
+            </div>
+            <div>
+              <div className="font-bold text-lg text-white leading-none">{s.value}</div>
+              <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>{s.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="w-8 h-8 border-2 border-white/10 rounded-full animate-spin" style={{ borderTopColor: "var(--neon-orange)" }} />
+        </div>
+      ) : view === "kanban" ? (
+        /* Канбан */
+        <div className="flex gap-3 overflow-x-auto pb-4">
+          {CRM_STAGES.map(stage => {
+            const stageLeads = filtered.filter(l => l.stage === stage.id);
+            return (
+              <div key={stage.id} className="flex-shrink-0 w-64">
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <div className="w-2 h-2 rounded-full" style={{ background: stage.color }} />
+                  <span className="text-xs font-semibold" style={{ color: stage.color }}>{stage.label}</span>
+                  <span className="text-xs ml-auto px-1.5 py-0.5 rounded-full"
+                    style={{ background: `${stage.color}18`, color: stage.color }}>
+                    {stats[stage.id] || 0}
+                  </span>
+                </div>
+                <div className="space-y-2 min-h-16 rounded-xl p-2" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  {stageLeads.map(l => (
+                    <CrmLeadCard key={l.id} lead={l} onClick={() => setSelectedLead(l)} />
+                  ))}
+                  {stageLeads.length === 0 && (
+                    <div className="text-center py-4 text-xs" style={{ color: "rgba(255,255,255,0.15)" }}>Пусто</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Список */
+        <div>
+          <div className="flex gap-1 mb-3 flex-wrap">
+            <button onClick={() => setStageFilter("all")}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium"
+              style={{ background: stageFilter === "all" ? "rgba(255,107,26,0.15)" : "rgba(255,255,255,0.05)", color: stageFilter === "all" ? "var(--neon-orange)" : "rgba(255,255,255,0.4)" }}>
+              Все ({leads.length})
+            </button>
+            {CRM_STAGES.map(s => (
+              <button key={s.id} onClick={() => setStageFilter(s.id)}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                style={{ background: stageFilter === s.id ? `${s.color}18` : "rgba(255,255,255,0.05)", color: stageFilter === s.id ? s.color : "rgba(255,255,255,0.4)" }}>
+                {s.label} {stats[s.id] ? `(${stats[s.id]})` : ""}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {filtered.map(l => {
+              const stage = CRM_STAGES.find(s => s.id === l.stage) || CRM_STAGES[0];
+              return (
+                <div key={l.id} onClick={() => setSelectedLead(l)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/5 transition-all"
+                  style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: stage.color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-white">{l.name}</div>
+                    <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                      {l.phone} {l.source_name && `· ${l.source_name}`}
+                    </div>
+                  </div>
+                  <div className="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+                    style={{ background: `${stage.color}18`, color: stage.color }}>
+                    {stage.label}
+                  </div>
+                  {l.budget && <div className="text-xs font-mono flex-shrink-0" style={{ color: "#FBBF24" }}>{fmt(l.budget)} ₽</div>}
+                  <div className="text-xs flex-shrink-0" style={{ color: "rgba(255,255,255,0.25)" }}>
+                    {new Date(l.created_at).toLocaleDateString("ru-RU")}
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="text-center py-12 rounded-2xl" style={{ background: "var(--card-bg)", color: "rgba(255,255,255,0.3)" }}>
+                <Icon name="Inbox" size={32} style={{ margin: "0 auto 8px" }} />
+                <div className="text-sm">Лидов нет</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Модалка лида */}
+      {selectedLead && (
+        <CrmLeadModal lead={selectedLead} token={token} sources={sources}
+          onClose={() => setSelectedLead(null)}
+          onUpdated={() => { load(); }} />
+      )}
+
+      {/* Создать лид */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+          <div className="w-full max-w-md rounded-2xl p-6" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="flex items-center justify-between mb-5">
+              <div className="font-bold text-white">Новый лид</div>
+              <button onClick={() => setShowCreate(false)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10"
+                style={{ color: "rgba(255,255,255,0.4)" }}><Icon name="X" size={14} /></button>
+            </div>
+            <div className="space-y-3">
+              {[["name","Имя *","text"],["phone","Телефон","tel"],["email","Email","email"]].map(([k,l,t]) => (
+                <div key={k}>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
+                  <input type={t} value={(newForm as Record<string,string>)[k]} onChange={e => setNewForm(f => ({ ...f, [k]: e.target.value }))}
+                    className={inp} style={inpS} />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Источник</label>
+                <select value={newForm.source_id} onChange={e => setNewForm(f => ({ ...f, source_id: e.target.value }))}
+                  className={inp} style={{ ...inpS, background: "#1a1f2e" }}>
+                  <option value="">— выбрать —</option>
+                  {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Этап</label>
+                <select value={newForm.stage} onChange={e => setNewForm(f => ({ ...f, stage: e.target.value }))}
+                  className={inp} style={{ ...inpS, background: "#1a1f2e" }}>
+                  {CRM_STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={createLead} disabled={creating || !newForm.name.trim()}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
+                style={{ background: "var(--neon-orange)", color: "#fff" }}>
+                <Icon name={creating ? "Loader" : "Plus"} size={14} className={creating ? "animate-spin" : ""} />
+                Создать
+              </button>
+              <button onClick={() => setShowCreate(false)} className="px-4 py-2.5 rounded-xl text-sm"
+                style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>Отмена</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main SalesManager ────────────────────────────────────────────────────────
 
 export default function SalesManager({ user, token }: SalesManagerProps) {
+  const [mainTab, setMainTab] = useState<"crm" | "orders">("crm");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "detail">("list");
@@ -1553,8 +2221,42 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
     );
   }
 
+  // Новая CRM воронка — основная вкладка
+  if (mainTab === "crm") {
+    return (
+      <div>
+        <div className="flex gap-2 mb-5">
+          <button onClick={() => setMainTab("crm")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+            <Icon name="Kanban" size={14} /> Воронка CRM
+          </button>
+          <button onClick={() => setMainTab("orders")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="ClipboardList" size={14} /> Заказы
+          </button>
+        </div>
+        <CrmKanban user={user} token={token} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
+      {/* Переключатель вкладок */}
+      <div className="flex gap-2 mb-1">
+        <button onClick={() => setMainTab("crm")}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+          style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+          <Icon name="Kanban" size={14} /> Воронка CRM
+        </button>
+        <button onClick={() => setMainTab("orders")}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+          style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+          <Icon name="ClipboardList" size={14} /> Заказы
+        </button>
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
