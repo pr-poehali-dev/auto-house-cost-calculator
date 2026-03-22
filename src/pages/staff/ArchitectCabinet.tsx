@@ -2,17 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
-import NormDocuments from "@/components/project-editor/NormDocuments";
-import GeometryCalc from "@/components/project-editor/GeometryCalc";
-import BimImporter from "@/components/project-editor/BimImporter";
-import PriceMatch from "@/components/project-editor/PriceMatch";
-import TzAnalyzer from "@/pages/staff/TzAnalyzer";
+import ObjectInfoTab, { type ObjectInfo, EMPTY_INFO } from "@/components/project-editor/ObjectInfoTab";
 import type { AiItem } from "@/pages/staff/materials-types";
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
-const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
-const SPEC_AI_URL = "https://functions.poehali.dev/8ecbdbca-904c-4ffc-a3b2-3279170e95ee";
 const CHUNK_SIZE = 512 * 1024; // 512КБ бинарных → ~700КБ base64, гарантированно в лимите платформы
 
 async function uploadFileChunked(
@@ -1243,15 +1237,15 @@ function AiAssistantTab({ proj, token, onApply }: {
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"ai" | "info" | "files" | "docs" | "spec" | "tech" | "norms" | "calc" | "bim">("ai");
+  const [tab, setTab] = useState<"info" | "files" | "docs" | "tech">("info");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [selectedFileType, setSelectedFileType] = useState("render");
-  const [spec, setSpec] = useState<Spec | null>(null);
-  const [specLoading, setSpecLoading] = useState(false);
   const [showTechCards, setShowTechCards] = useState(false);
   const [pendingDocItems, setPendingDocItems] = useState<AiItem[] | null>(null);
+  const [objectInfo, setObjectInfo] = useState<ObjectInfo>(EMPTY_INFO);
+  const [infoSaving, setInfoSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadProject = useCallback(async () => {
@@ -1259,97 +1253,23 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     if (r.project) setProj(r.project);
   }, [project.id, token]);
 
-  const loadSpec = useCallback(async () => {
-    setSpecLoading(true);
-    const r = await apiFetch(`${PROJECTS_URL}?action=spec_get&project_id=${project.id}`, {}, token);
-    setSpec(r.spec || null);
-    setSpecLoading(false);
-  }, [project.id, token]);
-
   useEffect(() => { if (tab === "files") loadProject(); }, [tab, loadProject]);
-  useEffect(() => { if (tab === "spec") loadSpec(); }, [tab, loadSpec]);
-
-  const createSpec = async () => {
-    setSpecLoading(true);
-    await apiFetch(`${PROJECTS_URL}?action=spec_create`, {
-      method: "POST",
-      body: JSON.stringify({ project_id: project.id, title: `Ведомость ОР — ${proj.name}`, items: [] }),
-    }, token);
-    await loadSpec();
-  };
 
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [aiParsedItems, setAiParsedItems] = useState<{section:string;name:string;unit:string;qty:number;price_per_unit:number;note:string}[]>([]);
-  const [aiParseLoading, setAiParseLoading] = useState(false);
-  const [aiParseMsg, setAiParseMsg] = useState("");
-  const [addingToSpec, setAddingToSpec] = useState(false);
 
   const uploadFile = async (file: File) => {
     setUploading(true); setUploadMsg(""); setUploadProgress(0);
-    setAiParsedItems([]); setAiParseMsg("");
     try {
       const result = await uploadFileChunked(file, project.id, selectedFileType, token, setUploadProgress);
       if (!result) { setUploadMsg("Ошибка загрузки файла"); setUploading(false); return; }
-
       const r2 = await apiFetch(`${PROJECTS_URL}?action=confirm_upload`, {
         method: "POST",
         body: JSON.stringify({ project_id: project.id, file_name: file.name, file_type: selectedFileType, cdn_url: result.cdn_url }),
       }, token);
-      if (r2.ok) {
-        setUploadMsg("Файл загружен!");
-        loadProject(); onRefresh();
-
-        // Для spec и project_full — автоматически запускаем AI-разбор
-        const parseable = ["spec","project_full","other"].includes(selectedFileType)
-          && file.name.match(/\.(pdf|xlsx|xls|csv)$/i);
-        if (parseable) {
-          setAiParseLoading(true);
-          setAiParseMsg("AI читает файл и извлекает позиции...");
-          const s3key = result.key;
-          const ra = await apiFetch(`${SPEC_AI_URL}?action=upload_spec`, {
-            method: "POST",
-            body: JSON.stringify({ project_id: project.id, file_name: file.name, s3_key: s3key }),
-          }, token);
-          setAiParseLoading(false);
-          if (ra.items && ra.items.length > 0) {
-            setAiParsedItems(ra.items);
-            setAiParseMsg(`AI нашёл ${ra.items.length} позиций — добавить в ведомость?`);
-          } else {
-            setAiParseMsg(ra.error || "AI не смог извлечь позиции из файла");
-          }
-        }
-      } else {
-        setUploadMsg(r2.error || "Ошибка подтверждения");
-      }
-    } catch (e) { setUploadMsg("Ошибка загрузки: " + String(e)); }
+      if (r2.ok) { setUploadMsg("Файл загружен!"); loadProject(); onRefresh(); }
+      else setUploadMsg(r2.error || "Ошибка подтверждения");
+    } catch (e) { setUploadMsg("Ошибка: " + String(e)); }
     setUploading(false);
-  };
-
-  const addParsedItemsToSpec = async () => {
-    if (!aiParsedItems.length) return;
-    setAddingToSpec(true);
-    // Создаём ведомость если нет
-    let specId = spec?.id;
-    if (!specId) {
-      await apiFetch(`${PROJECTS_URL}?action=spec_create`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: project.id, title: `Ведомость ОР — ${proj.name}`, items: [] }),
-      }, token);
-      await loadSpec();
-      const rs = await apiFetch(`${PROJECTS_URL}?action=spec_get&project_id=${project.id}`, {}, token);
-      specId = rs.spec?.id;
-    }
-    // Добавляем позиции по одной
-    for (const item of aiParsedItems) {
-      await apiFetch(`${PROJECTS_URL}?action=spec_add_item`, {
-        method: "POST",
-        body: JSON.stringify({ spec_id: specId, ...item }),
-      }, token);
-    }
-    setAddingToSpec(false);
-    setAiParsedItems([]);
-    setAiParseMsg(`✓ ${aiParsedItems.length} позиций добавлено в ведомость`);
-    loadSpec();
   };
 
   const deleteFile = async (fileId: number) => {
@@ -1360,16 +1280,20 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     loadProject(); onRefresh();
   };
 
+  const saveInfo = async () => {
+    setInfoSaving(true);
+    await apiFetch(`${PROJECTS_URL}?action=save_object_info`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, info: objectInfo }),
+    }, token);
+    setInfoSaving(false);
+  };
+
   const TABS = [
-    { id: "ai",   label: "AI-ассистент",  icon: "Sparkles" },
-    { id: "calc", label: "Расчёт",        icon: "Calculator" },
-    { id: "bim",  label: "Импорт BIM",    icon: "Box" },
-    { id: "info", label: "Информация",    icon: "Info" },
-    { id: "files",label: "Графика",       icon: "Image",          count: proj.files?.length },
-    { id: "docs", label: "Документация",  icon: "FolderOpen",     highlight: pendingDocItems ? pendingDocItems.length : 0 },
-    { id: "spec", label: "ВОР",           icon: "FileSpreadsheet" },
-    { id: "tech", label: "Тех. карты",    icon: "BookOpen" },
-    { id: "norms",label: "Нормативы",     icon: "BookMarked" },
+    { id: "info",  label: "1. Информация об объекте", icon: "ClipboardList" },
+    { id: "files", label: "2. Загрузка документов",   icon: "Upload",       count: proj.files?.length },
+    { id: "tech",  label: "3. Тех. карты",            icon: "BookOpen" },
+    { id: "docs",  label: "4. Документация",          icon: "FolderOpen",   highlight: pendingDocItems ? pendingDocItems.length : 0 },
   ] as const;
 
   const filesByType = FILE_TYPES.map(ft => ({
@@ -1400,21 +1324,17 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-xl mb-6 overflow-x-auto" style={{ background: "rgba(255,255,255,0.04)" }}>
         {TABS.map(t => {
-          const isAi = t.id === "ai";
           const isActive = tab === t.id;
           return (
             <button key={t.id} onClick={() => setTab(t.id)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
               style={{
-                background: isActive ? (isAi ? "var(--neon-cyan)" : "var(--neon-orange)") : "transparent",
-                color: isActive ? (isAi ? "#0a0d14" : "#fff") : "rgba(255,255,255,0.5)",
-                boxShadow: isActive ? (isAi ? "0 0 15px rgba(0,212,255,0.35)" : "0 0 15px rgba(255,107,26,0.3)") : "none",
+                background: isActive ? "var(--neon-orange)" : "transparent",
+                color: isActive ? "#fff" : "rgba(255,255,255,0.5)",
+                boxShadow: isActive ? "0 0 15px rgba(255,107,26,0.3)" : "none",
               }}>
               <Icon name={t.icon} size={14} />
               {t.label}
-              {isAi && !isActive && (
-                <span className="ml-1 w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--neon-cyan)" }} />
-              )}
               {"count" in t && t.count ? (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold"
                   style={{ background: isActive ? "rgba(255,255,255,0.25)" : "rgba(255,107,26,0.3)", color: isActive ? "#fff" : "var(--neon-orange)", fontSize: 10 }}>
@@ -1432,34 +1352,14 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
         })}
       </div>
 
-      {/* ── Информация ── */}
+      {/* ── 1. Информация об объекте ── */}
       {tab === "info" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="rounded-2xl p-5" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-            <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Характеристики</div>
-            {[
-              ["Тип", proj.type], ["Площадь", `${proj.area} м²`], ["Этажей", String(proj.floors)],
-              ["Комнат", String(proj.rooms)], ["Стоимость от", `${fmt(proj.price)} ₽`],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>{k}</span>
-                <span className="text-sm font-medium text-white">{v}</span>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-2xl p-5" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-            <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Описание и особенности</div>
-            <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.6)", lineHeight: 1.6 }}>{proj.description || "—"}</p>
-            <div className="space-y-1.5">
-              {(proj.features || "").split(",").filter(Boolean).map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: proj.tag_color }} />
-                  {f.trim()}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ObjectInfoTab
+          info={objectInfo}
+          onChange={patch => setObjectInfo(prev => ({ ...prev, ...patch }))}
+          onSave={saveInfo}
+          saving={infoSaving}
+        />
       )}
 
       {/* ── Графика ── */}
@@ -1621,155 +1521,17 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
         </div>
       )}
 
-      {/* ── Документация ── */}
-      {tab === "docs" && (
-        <DocUploadManager
-          token={token}
-          projectId={proj.id}
-          onImport={(items) => {
-            setPendingDocItems(items);
-            setTab("spec");
-          }}
-        />
-      )}
-
-      {/* ── Ведомость ОР ── */}
-      {tab === "spec" && (
-        <div>
-          {/* Баннер импорта из документации */}
-          {pendingDocItems && pendingDocItems.length > 0 && (
-            <div className="mb-4 p-4 rounded-xl flex items-start gap-3"
-              style={{ background: "rgba(0,212,255,0.08)", border: "1px solid rgba(0,212,255,0.25)" }}>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: "rgba(0,212,255,0.15)" }}>
-                <Icon name="Sparkles" size={18} style={{ color: "var(--neon-cyan)" }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-white text-sm mb-0.5">
-                  Готово к импорту: {pendingDocItems.length} позиций из документа
-                </div>
-                <div className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  AI извлёк позиции постранично. Нажмите «Добавить в ведомость».
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={async () => {
-                    let specId = spec?.id;
-                    if (!specId) {
-                      const res = await apiFetch(`${PROJECTS_URL}?action=spec_create`, {
-                        method: "POST", body: JSON.stringify({ project_id: proj.id, items: [] }),
-                      }, token);
-                      if (res.ok) { await loadSpec(); specId = res.spec_id; }
-                    }
-                    if (!specId && spec) specId = spec.id;
-                    if (!specId) return;
-                    for (const item of pendingDocItems) {
-                      await apiFetch(`${PROJECTS_URL}?action=spec_add_item`, {
-                        method: "POST",
-                        body: JSON.stringify({ spec_id: specId, section: item.section || "Прочее", name: item.name, unit: item.unit || "шт", qty: item.qty || 0, price_per_unit: item.price_per_unit || 0, note: item.note || "" }),
-                      }, token);
-                    }
-                    setPendingDocItems(null);
-                    loadSpec();
-                  }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                    style={{ background: "var(--neon-cyan)", color: "#000" }}>
-                    <Icon name="Download" size={13} />
-                    Добавить в ведомость
-                  </button>
-                  <button onClick={() => setPendingDocItems(null)}
-                    className="px-3 py-1.5 rounded-lg text-xs"
-                    style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }}>
-                    Отмена
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        <div className="rounded-2xl p-5" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>Ведомость объёмов работ</div>
-              {spec && <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>v{spec.version} · {spec.status === "approved" ? "Утверждена" : "Черновик"}</div>}
-            </div>
-            {!spec && !specLoading && (
-              <button onClick={createSpec}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-                style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.25)" }}>
-                <Icon name="Plus" size={14} />
-                Создать ведомость
-              </button>
-            )}
-          </div>
-
-          {specLoading ? (
-            <div className="text-center py-8" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
-          ) : spec ? (
-            <SpecEditor spec={spec} token={token} onUpdate={loadSpec} />
-          ) : (
-            <div className="text-center py-10" style={{ color: "rgba(255,255,255,0.3)" }}>
-              <div className="text-3xl mb-2">📋</div>
-              Нажмите «Создать ведомость» чтобы начать
-            </div>
-          )}
-        </div>
-        </div>
-      )}
-
-      {/* ── AI-ассистент ── */}
-      {tab === "ai" && (
-        <AiAssistantTab
-          proj={proj}
-          token={token}
-          onApply={patch => setProj(p => ({ ...p, ...patch }))}
-        />
-      )}
-
-      {/* ── Тех. карты ── */}
+      {/* ── 3. Тех. карты ── */}
       {tab === "tech" && (
         <TechTab proj={proj} token={token} onOpenLibrary={() => setShowTechCards(true)} />
       )}
 
-      {/* ── Нормативные документы ── */}
-      {tab === "norms" && (
-        <NormDocuments token={token} />
-      )}
-
-      {/* ── Импорт BIM / IFC / Excel / PDF / DWG ── */}
-      {tab === "bim" && (
-        <BimImporter
+      {/* ── 4. Документация ── */}
+      {tab === "docs" && (
+        <DocUploadManager
           token={token}
-          onImport={(items) => {
-            setTab("spec");
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("bom-ready", { detail: { items, projectId: proj.id } }));
-            }, 100);
-          }}
-        />
-      )}
-
-      {/* ── Геометрический расчёт ── */}
-      {tab === "calc" && (
-        <GeometryCalc
           projectId={proj.id}
-          token={token}
-          projectArea={proj.area}
-          projectFloors={proj.floors}
-          onBomReady={(items) => {
-            // Конвертируем в формат AiItem и открываем спецификацию
-            const aiItems = items.map(it => ({
-              section: it.section,
-              name: it.name,
-              unit: it.unit,
-              qty: it.qty,
-              price_per_unit: 0,
-              note: `ТТК #${it.ttk_id}`,
-            }));
-            setTab("spec");
-            // Небольшая задержка чтобы вкладка отрисовалась
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("bom-ready", { detail: { items: aiItems, projectId: proj.id } }));
-            }, 100);
-          }}
+          onImport={(items) => { setPendingDocItems(items); }}
         />
       )}
 
@@ -1805,8 +1567,6 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-  const [showTzAnalyzer, setShowTzAnalyzer] = useState(false);
-
   const load = useCallback(async () => {
     setLoading(true);
     const r = await apiFetch(`${PROJECTS_URL}?action=list`, {}, token);
@@ -1876,12 +1636,6 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{user.full_name} · {projects.length} проектов</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowTzAnalyzer(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-            style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
-            <Icon name="FileSearch" size={15} />
-            Анализ ТЗ
-          </button>
           <button onClick={openNew}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
             style={{ background: "var(--neon-cyan)", color: "#0A0D14", boxShadow: "0 0 20px rgba(0,212,255,0.3)" }}>
@@ -2253,7 +2007,6 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
         </div>
       )}
 
-      {showTzAnalyzer && <TzAnalyzer onClose={() => setShowTzAnalyzer(false)} />}
     </div>
   );
 }
