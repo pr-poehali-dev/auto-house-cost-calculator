@@ -81,6 +81,7 @@ LEAD_SELECT = f"""
     LEFT JOIN {S}.staff sc ON sc.id = l.created_by
 """
 
+
 def handler(event: dict, context) -> dict:
     """CRM: управление лидами и воронкой продаж"""
     if event.get("httpMethod") == "OPTIONS":
@@ -152,7 +153,7 @@ def handler(event: dict, context) -> dict:
         # История событий
         cur.execute(
             f"SELECT le.id, le.type, le.content, le.old_stage, le.new_stage, le.created_at, s.full_name "
-            f"FROM {S}.lead_events le LEFT JOIN {S}.staff s ON s.id = le.staff_id "
+            f"FROM {S}.crm_events le LEFT JOIN {S}.staff s ON s.id = le.staff_id "
             f"WHERE le.lead_id = %s ORDER BY le.created_at DESC", (lid,))
         events = [{"id": e[0], "type": e[1], "content": e[2], "old_stage": e[3],
                    "new_stage": e[4], "created_at": str(e[5]), "by": e[6]} for e in cur.fetchall()]
@@ -187,7 +188,7 @@ def handler(event: dict, context) -> dict:
              body.get("next_contact_at")))
         new_id = cur.fetchone()[0]
         # Событие создания
-        cur.execute(f"INSERT INTO {S}.lead_events (lead_id, type, content, new_stage, staff_id) VALUES (%s,'created',%s,'new',%s)",
+        cur.execute(f"INSERT INTO {S}.crm_events (lead_id, type, content, new_stage, staff_id) VALUES (%s,'created',%s,'new',%s)",
                     (new_id, f"Лид создан: {name}", staff["id"]))
         conn.commit(); cur.close(); conn.close()
         return resp({"ok": True, "id": new_id})
@@ -228,7 +229,7 @@ def handler(event: dict, context) -> dict:
             f"rejected_reason=%s WHERE id=%s",
             (new_stage, body.get("rejected_reason") if new_stage == "rejected" else None, lid))
         cur.execute(
-            f"INSERT INTO {S}.lead_events (lead_id, type, content, old_stage, new_stage, staff_id) "
+            f"INSERT INTO {S}.crm_events (lead_id, type, content, old_stage, new_stage, staff_id) "
             f"VALUES (%s,'stage_change',%s,%s,%s,%s)",
             (lid, comment or f"{STAGE_LABELS.get(old_stage,old_stage)} → {STAGE_LABELS.get(new_stage,new_stage)}",
              old_stage, new_stage, staff["id"]))
@@ -243,7 +244,7 @@ def handler(event: dict, context) -> dict:
         if not lid or not content: conn.close(); return resp({"error": "lead_id и content обязательны"}, 400)
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO {S}.lead_events (lead_id, type, content, staff_id) VALUES (%s,%s,%s,%s) RETURNING id",
+            f"INSERT INTO {S}.crm_events (lead_id, type, content, staff_id) VALUES (%s,%s,%s,%s) RETURNING id",
             (lid, etype, content, staff["id"]))
         eid = cur.fetchone()[0]
         cur.execute(f"UPDATE {S}.leads SET updated_at=NOW() WHERE id=%s", (lid,))

@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 import ChatWidget from "@/components/ChatWidget";
 
 const AI_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
+const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
 
 const STYLES = [
   { id: "современный", label: "Современный", icon: "🏢", desc: "Минимализм, стекло, бетон" },
@@ -90,6 +91,26 @@ export default function ProjectBuilder() {
       if (res.ok) {
         setResult(res);
         setStep(4);
+        // Автоматически создаём лид в CRM
+        if (prefs.client_name && prefs.client_phone) {
+          fetch(`${CRM_URL}?action=create`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: prefs.client_name,
+              phone: prefs.client_phone,
+              email: prefs.client_email || null,
+              source_id: 1,
+              source_detail: "Конструктор проекта",
+              stage: "new",
+              area_desired: prefs.area,
+              floors_desired: prefs.floors,
+              rooms_desired: prefs.rooms,
+              wall_material_pref: prefs.house_type,
+              budget: prefs.budget,
+            }),
+          }).catch(() => {});
+        }
       }
     } catch (e) {
       console.error(e);

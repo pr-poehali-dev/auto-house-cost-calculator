@@ -1,8 +1,98 @@
+import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import {
   HOUSE_TYPES, ROOF_TYPES, FOUNDATION_TYPES, FINISHING,
   COMMUNICATIONS, ADDITIONAL, formatPrice,
 } from "./data";
+
+const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
+
+function LeadModal({ onClose, calcData }: {
+  onClose: () => void;
+  calcData: { area: number; floors: number; houseType: string; totalCost: number };
+}) {
+  const [form, setForm] = useState({ name: "", phone: "", email: "" });
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.phone) return;
+    setSending(true);
+    try {
+      await fetch(`${CRM_URL}?action=create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          email: form.email || null,
+          source_id: 1,
+          source_detail: "Калькулятор стоимости",
+          stage: "new",
+          area_desired: calcData.area,
+          floors_desired: calcData.floors,
+          wall_material_pref: calcData.houseType,
+          budget: calcData.totalCost,
+        }),
+      });
+    } catch { /* продолжаем */ }
+    setSending(false);
+    setSent(true);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: "rgba(0,0,0,0.75)" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,107,26,0.25)" }}>
+        {sent ? (
+          <div className="text-center py-4">
+            <div className="text-4xl mb-3">🎉</div>
+            <div className="font-bold text-white text-lg mb-2">Заявка принята!</div>
+            <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.5)" }}>
+              Наш менеджер свяжется с вами в течение 15 минут
+            </p>
+            <button onClick={onClose} className="px-6 py-2.5 rounded-xl text-sm font-semibold"
+              style={{ background: "var(--neon-orange)", color: "#fff" }}>
+              Закрыть
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="font-bold text-white">Получить КП</div>
+                <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  {calcData.area} м² · {calcData.floors} эт. · {formatPrice(calcData.totalCost)}
+                </div>
+              </div>
+              <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10"
+                style={{ color: "rgba(255,255,255,0.4)" }}><Icon name="X" size={14} /></button>
+            </div>
+            <form onSubmit={submit} className="space-y-3">
+              {[["name","Ваше имя *","text"],["phone","Телефон *","tel"],["email","Email","email"]].map(([k,l,t]) => (
+                <div key={k}>
+                  <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
+                  <input type={t} value={(form as Record<string,string>)[k]}
+                    onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+                    required={k !== "email"}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              ))}
+              <button type="submit" disabled={sending || !form.name || !form.phone}
+                className="w-full py-3 rounded-xl font-semibold text-sm disabled:opacity-50 transition-all hover:scale-[1.02]"
+                style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff" }}>
+                {sending ? "Отправляю..." : "Отправить заявку"}
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
 
@@ -123,14 +213,22 @@ function ResultPanel({
       </div>
 
       {/* CTA */}
-      <button className="w-full py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+      <button onClick={() => setShowLeadModal(true)}
+        className="w-full py-4 rounded-xl font-display font-semibold text-base tracking-wide transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
         style={{ background: "linear-gradient(135deg, var(--neon-orange), #FF3D00)", color: "#fff", boxShadow: "0 0 30px rgba(255,107,26,0.45)" }}>
         Получить коммерческое предложение
       </button>
-      <button className="w-full py-3 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/10"
+      <button onClick={() => setShowLeadModal(true)}
+        className="w-full py-3 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/10"
         style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)" }}>
         💾 Сохранить расчёт
       </button>
+      {showLeadModal && (
+        <LeadModal
+          onClose={() => setShowLeadModal(false)}
+          calcData={{ area, floors, houseType: houseTypeData.label, totalCost }}
+        />
+      )}
     </div>
   );
 }
@@ -168,6 +266,7 @@ export default function CalcTab({
 }: CalcTabProps) {
   const houseTypeData = HOUSE_TYPES.find(h => h.id === houseType)!;
   const finishingData = FINISHING.find(f => f.id === finishing)!;
+  const [showLeadModal, setShowLeadModal] = useState(false);;
 
   return (
     <div className="animate-fade-in">

@@ -69,12 +69,30 @@ export default function ProjectDetail() {
       .catch(() => { setTtkItems([]); setLoadingTtk(false); });
   }, [activeTab, project, ttkItems, loadingTtk]);
 
+  const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
+
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.phone) return;
     setSubmitting(true);
-    // Отправляем через order-api как новый лид
     try {
+      // Создаём лид в CRM
+      await fetch(`${CRM_URL}?action=create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          source_id: 1, // Сайт (форма заявки)
+          source_detail: `Проект: ${project?.name}`,
+          stage: "new",
+          area_desired: project?.area,
+          floors_desired: project?.floors,
+          project_id: project?.id,
+          project_name: project?.name,
+        }),
+      });
+      // Также отправляем в order-api (старая логика)
       await fetch("https://functions.poehali.dev/5cd1eb69-9a08-4572-ae2a-bc11e49da506?action=create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

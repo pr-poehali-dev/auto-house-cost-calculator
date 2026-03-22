@@ -1,0 +1,7 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "GET health check", "method": "GET", "path": "/", "expectedStatus": 400, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"},
+    {"name": "Авито без данных", "method": "POST", "path": "/?source=avito", "expectedStatus": 200, "expectedBody": {"ok": true}, "bodyMatcher": "partial"}
+  ]
+}
