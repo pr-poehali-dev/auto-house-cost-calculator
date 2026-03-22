@@ -97,6 +97,15 @@ interface Project {
   door_info: string; staircase_info: string;
   roof_material: string; roof_area: string; roof_style: string;
   heating_type: string; water_supply: string; sewage: string; electrical: string;
+  // Блокировка и согласование
+  calc_status?: string;
+  locked_by?: number | null;
+  locked_by_name?: string | null;
+  locked_by_me?: boolean;
+  has_calc?: boolean;
+  assigned_reviewer?: number | null;
+  reviewer_name?: string | null;
+  review_comment?: string | null;
 }
 
 interface MatchedTTK {
@@ -1238,7 +1247,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
-function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
+function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: Project; token: string; user: StaffUser; onBack: () => void; onRefresh: () => void }) {
   const [tab, setTab] = useState<"info" | "calc" | "files" | "docs" | "tech">("info");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
@@ -1254,10 +1263,67 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Блокировка и согласование
+  const [lockStatus, setLockStatus] = useState({ locked: project.locked_by != null, lockedByMe: !!project.locked_by_me, lockedByName: project.locked_by_name || "" });
+  const [calcStatus, setCalcStatus] = useState(project.calc_status || "draft");
+  const [showSubmitPanel, setShowSubmitPanel] = useState(false);
+  const [showApprovePanel, setShowApprovePanel] = useState(false);
+  const [reviewers, setReviewers] = useState<{id: number; full_name: string; role_code: string}[]>([]);
+  const [selectedReviewer, setSelectedReviewer] = useState<number | null>(project.assigned_reviewer || null);
+  const [approveComment, setApproveComment] = useState("");
+  const [reviewHistory, setReviewHistory] = useState<{id: number; action: string; comment: string; created_at: string; by: string}[]>([]);
+  const [lockMsg, setLockMsg] = useState("");
+
+  const isArchitect = user.role_code === "architect" || user.role_code === "constructor";
+  const isManager = user.role_code === "admin" || user.role_code === "manager";
+  const canEdit = lockStatus.lockedByMe || (!lockStatus.locked && isArchitect);
+  const isBlocked = lockStatus.locked && !lockStatus.lockedByMe;
+
   const loadProject = useCallback(async () => {
     const r = await apiFetch(`${PROJECTS_URL}?action=get&project_id=${project.id}`, {}, token);
     if (r.project) setProj(r.project);
   }, [project.id, token]);
+
+  const refreshLockStatus = useCallback(async () => {
+    const r = await apiFetch(`${PROJECTS_URL}?action=lock_status&project_id=${project.id}`, {}, token);
+    if (r.calc_status !== undefined) {
+      setLockStatus({ locked: r.locked, lockedByMe: r.locked_by_me, lockedByName: r.locked_by_name || "" });
+      setCalcStatus(r.calc_status);
+    }
+  }, [project.id, token]);
+
+  const lockProject = async () => {
+    setLockMsg("");
+    const r = await apiFetch(`${PROJECTS_URL}?action=lock`, { method: "POST", body: JSON.stringify({ project_id: project.id }) }, token);
+    if (r.ok) { setLockStatus({ locked: true, lockedByMe: true, lockedByName: "" }); setCalcStatus("in_progress"); onRefresh(); }
+    else setLockMsg(r.error || "Ошибка блокировки");
+  };
+
+  const unlockProject = async () => {
+    const r = await apiFetch(`${PROJECTS_URL}?action=unlock`, { method: "POST", body: JSON.stringify({ project_id: project.id }) }, token);
+    if (r.ok) { setLockStatus({ locked: false, lockedByMe: false, lockedByName: "" }); setCalcStatus("draft"); onRefresh(); }
+  };
+
+  const submitForReview = async () => {
+    if (!selectedReviewer) return;
+    const r = await apiFetch(`${PROJECTS_URL}?action=submit_for_review`, {
+      method: "POST", body: JSON.stringify({ project_id: project.id, reviewer_id: selectedReviewer }),
+    }, token);
+    if (r.ok) { setCalcStatus("submitted"); setShowSubmitPanel(false); onRefresh(); }
+  };
+
+  const doApprove = async (action: "approve" | "reject") => {
+    if (action === "reject" && !approveComment.trim()) return;
+    const r = await apiFetch(`${PROJECTS_URL}?action=${action}`, {
+      method: "POST", body: JSON.stringify({ project_id: project.id, comment: approveComment }),
+    }, token);
+    if (r.ok) {
+      setCalcStatus(r.status);
+      setShowApprovePanel(false);
+      if (action === "reject") setLockStatus(prev => ({ ...prev, locked: false, lockedByMe: false }));
+      onRefresh();
+    }
+  };
 
   // Загружаем сохранённые элементы расчёта при открытии проекта
   useEffect(() => {
@@ -1283,10 +1349,28 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const handlePlacedChange = (els: PlacedElement[]) => {
     setPlacedElements(els);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => saveCalc(els), 2000);
+    saveTimerRef.current = setTimeout(() => {
+      saveCalc(els);
+      apiFetch(`${PROJECTS_URL}?action=update_has_calc`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, has_calc: els.length > 0 }),
+      }, token);
+    }, 2000);
   };
 
   useEffect(() => { if (tab === "files") loadProject(); }, [tab, loadProject]);
+
+  // Загрузка рецензентов и истории
+  useEffect(() => {
+    apiFetch(`${PROJECTS_URL}?action=reviewers_list`, {}, token).then(r => { if (r.reviewers) setReviewers(r.reviewers); });
+    apiFetch(`${PROJECTS_URL}?action=reviews_history&project_id=${project.id}`, {}, token).then(r => { if (r.history) setReviewHistory(r.history); });
+  }, [project.id, token]);
+
+  // Обновление статуса блокировки каждые 15 сек (пока открыт проект)
+  useEffect(() => {
+    const interval = setInterval(refreshLockStatus, 15000);
+    return () => clearInterval(interval);
+  }, [refreshLockStatus]);
 
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -1335,10 +1419,19 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
     files: (proj.files || []).filter(f => f.file_type === ft.id),
   }));
 
+  const statusConfig: Record<string, { label: string; color: string; bg: string; border: string }> = {
+    draft:       { label: "Черновик",        color: "rgba(255,255,255,0.5)", bg: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.1)" },
+    in_progress: { label: "В работе",        color: "#FBBF24",               bg: "rgba(251,191,36,0.1)",  border: "rgba(251,191,36,0.3)" },
+    submitted:   { label: "На согласовании", color: "#00D4FF",               bg: "rgba(0,212,255,0.1)",   border: "rgba(0,212,255,0.3)" },
+    approved:    { label: "Согласован ✓",    color: "#00FF88",               bg: "rgba(0,255,136,0.1)",   border: "rgba(0,255,136,0.3)" },
+    rejected:    { label: "Отклонён",        color: "#EF4444",               bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)" },
+  };
+  const sc = statusConfig[calcStatus] || statusConfig.draft;
+
   return (
     <div className="animate-fade-in">
       {/* Back + header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <button onClick={onBack} className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-white/10"
           style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
           <Icon name="ArrowLeft" size={16} />
@@ -1354,6 +1447,179 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
           {proj.tag || "—"}
         </div>
       </div>
+
+      {/* ── Панель статуса / блокировки ── */}
+      <div className="rounded-xl px-4 py-3 mb-5 flex items-center gap-3 flex-wrap"
+        style={{ background: sc.bg, border: `1px solid ${sc.border}` }}>
+
+        {/* Статус */}
+        <div className="flex items-center gap-2">
+          <Icon name={calcStatus === "approved" ? "CheckCircle" : calcStatus === "rejected" ? "XCircle" : calcStatus === "submitted" ? "Clock" : calcStatus === "in_progress" ? "Lock" : "FileText"} size={15} style={{ color: sc.color }} />
+          <span className="text-sm font-semibold" style={{ color: sc.color }}>{sc.label}</span>
+        </div>
+
+        {/* Кто редактирует */}
+        {lockStatus.locked && (
+          <div className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg"
+            style={{ background: lockStatus.lockedByMe ? "rgba(251,191,36,0.15)" : "rgba(239,68,68,0.15)", color: lockStatus.lockedByMe ? "#FBBF24" : "#EF4444" }}>
+            <Icon name={lockStatus.lockedByMe ? "LockOpen" : "Lock"} size={11} />
+            {lockStatus.lockedByMe ? "Вы редактируете" : `Редактирует: ${lockStatus.lockedByName}`}
+          </div>
+        )}
+
+        {/* Комментарий при отклонении */}
+        {calcStatus === "rejected" && proj.review_comment && (
+          <div className="flex items-start gap-1.5 text-xs flex-1 min-w-0">
+            <Icon name="MessageSquare" size={11} style={{ color: "#EF4444", marginTop: 2, flexShrink: 0 }} />
+            <span style={{ color: "rgba(255,255,255,0.6)" }}>{proj.review_comment}</span>
+          </div>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Архитектор: взять в работу / отправить на согласование / завершить */}
+          {isArchitect && !isBlocked && (
+            <>
+              {!lockStatus.locked && calcStatus !== "submitted" && calcStatus !== "approved" && (
+                <button onClick={lockProject}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                  style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.3)" }}>
+                  <Icon name="Play" size={12} />
+                  Взять в работу
+                </button>
+              )}
+              {lockStatus.lockedByMe && calcStatus !== "submitted" && (
+                <button onClick={() => setShowSubmitPanel(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                  style={{ background: "rgba(0,212,255,0.15)", color: "#00D4FF", border: "1px solid rgba(0,212,255,0.3)" }}>
+                  <Icon name="Send" size={12} />
+                  На согласование
+                </button>
+              )}
+              {lockStatus.lockedByMe && (
+                <button onClick={unlockProject}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                  style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <Icon name="Unlock" size={12} />
+                  Снять блокировку
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Руководитель: согласовать / отклонить */}
+          {isManager && calcStatus === "submitted" && (
+            <button onClick={() => setShowApprovePanel(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+              style={{ background: "rgba(0,255,136,0.15)", color: "#00FF88", border: "1px solid rgba(0,255,136,0.3)" }}>
+              <Icon name="ClipboardCheck" size={12} />
+              Рассмотреть
+            </button>
+          )}
+
+          {/* Разблокировать (admin принудительно) */}
+          {isManager && lockStatus.locked && !lockStatus.lockedByMe && (
+            <button onClick={unlockProject}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{ background: "rgba(239,68,68,0.1)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.2)" }}>
+              <Icon name="Unlock" size={12} />
+              Разблокировать
+            </button>
+          )}
+        </div>
+      </div>
+      {lockMsg && <div className="text-xs mb-3" style={{ color: "#EF4444" }}>{lockMsg}</div>}
+
+      {/* ── Заблокировано другим — баннер ── */}
+      {isBlocked && (
+        <div className="rounded-xl px-4 py-3 mb-5 flex items-center gap-3"
+          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+          <Icon name="Lock" size={16} style={{ color: "#EF4444" }} />
+          <div>
+            <div className="text-sm font-semibold" style={{ color: "#EF4444" }}>Проект заблокирован</div>
+            <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+              {lockStatus.lockedByName} сейчас работает с этим проектом. Редактирование недоступно.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Панель отправки на согласование ── */}
+      {showSubmitPanel && (
+        <div className="rounded-xl p-4 mb-5" style={{ background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)" }}>
+          <div className="text-sm font-semibold text-white mb-3">Выберите руководителя для согласования</div>
+          <div className="space-y-2 mb-3">
+            {reviewers.map(r => (
+              <label key={r.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all"
+                style={{ background: selectedReviewer === r.id ? "rgba(0,212,255,0.12)" : "rgba(255,255,255,0.04)", border: `1px solid ${selectedReviewer === r.id ? "rgba(0,212,255,0.3)" : "rgba(255,255,255,0.07)"}` }}>
+                <input type="radio" name="reviewer" checked={selectedReviewer === r.id}
+                  onChange={() => setSelectedReviewer(r.id)} className="w-4 h-4" />
+                <div>
+                  <div className="text-sm text-white">{r.full_name}</div>
+                  <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>{r.role_code}</div>
+                </div>
+              </label>
+            ))}
+            {reviewers.length === 0 && <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Руководителей нет — добавьте сотрудников с ролью admin или manager</div>}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={submitForReview} disabled={!selectedReviewer}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+              style={{ background: "rgba(0,212,255,0.2)", color: "#00D4FF", border: "1px solid rgba(0,212,255,0.3)" }}>
+              <Icon name="Send" size={13} /> Отправить
+            </button>
+            <button onClick={() => setShowSubmitPanel(false)}
+              className="px-4 py-2 rounded-xl text-sm"
+              style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)" }}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Панель согласования (для руководителя) ── */}
+      {showApprovePanel && (
+        <div className="rounded-xl p-4 mb-5" style={{ background: "rgba(0,255,136,0.05)", border: "1px solid rgba(0,255,136,0.2)" }}>
+          <div className="text-sm font-semibold text-white mb-3">Решение по расчёту</div>
+          <textarea value={approveComment} onChange={e => setApproveComment(e.target.value)}
+            placeholder="Комментарий (обязателен при отклонении)..."
+            rows={3}
+            className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none mb-3 resize-none"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+          <div className="flex gap-2">
+            <button onClick={() => doApprove("approve")}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "rgba(0,255,136,0.2)", color: "#00FF88", border: "1px solid rgba(0,255,136,0.3)" }}>
+              <Icon name="CheckCircle" size={13} /> Согласовать
+            </button>
+            <button onClick={() => doApprove("reject")} disabled={!approveComment.trim()}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+              style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.3)" }}>
+              <Icon name="XCircle" size={13} /> Отклонить
+            </button>
+            <button onClick={() => setShowApprovePanel(false)}
+              className="px-4 py-2 rounded-xl text-sm ml-auto"
+              style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)" }}>
+              Отмена
+            </button>
+          </div>
+          {/* История */}
+          {reviewHistory.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.3)" }}>История согласований</div>
+              {reviewHistory.slice(0, 5).map(h => (
+                <div key={h.id} className="flex items-start gap-2 text-xs">
+                  <span className="flex-shrink-0" style={{ color: h.action === "approved" ? "#00FF88" : h.action === "rejected" ? "#EF4444" : "rgba(255,255,255,0.4)" }}>
+                    {h.action === "approved" ? "✓" : h.action === "rejected" ? "✕" : "→"}
+                  </span>
+                  <span className="font-medium" style={{ color: "rgba(255,255,255,0.6)" }}>{h.by}</span>
+                  {h.comment && <span style={{ color: "rgba(255,255,255,0.35)" }}>— {h.comment}</span>}
+                  <span className="ml-auto flex-shrink-0" style={{ color: "rgba(255,255,255,0.2)" }}>{new Date(h.created_at).toLocaleDateString("ru-RU")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-xl mb-6 overflow-x-auto" style={{ background: "rgba(255,255,255,0.04)" }}>
@@ -1399,22 +1665,48 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
       {/* ── 2. Расчёт по элементам ── */}
       {tab === "calc" && (
         <div>
-          {/* Статус сохранения */}
-          <div className="flex items-center gap-2 mb-4 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-            {calcSaving ? (
-              <><Icon name="Loader" size={12} className="animate-spin" /> Сохраняю...</>
-            ) : calcSavedAt ? (
-              <><Icon name="CheckCircle" size={12} style={{ color: "#00FF88" }} />
-              <span style={{ color: "#00FF88" }}>Сохранено</span>
-              <span>· {new Date(calcSavedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span></>
-            ) : null}
-          </div>
-          <ElementsCalcTab
-            info={objectInfo}
-            placed={placedElements}
-            onPlacedChange={handlePlacedChange}
-            token={token}
-          />
+          {/* Заблокировано другим */}
+          {isBlocked ? (
+            <div className="rounded-2xl p-12 text-center" style={{ background: "var(--card-bg)", border: "1px solid rgba(239,68,68,0.2)" }}>
+              <Icon name="Lock" size={40} style={{ color: "rgba(239,68,68,0.4)", margin: "0 auto 12px" }} />
+              <div className="font-semibold text-white mb-2">Редактирование недоступно</div>
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+                {lockStatus.lockedByName} сейчас работает с расчётом этого проекта.<br />
+                Вы можете просматривать данные, но не редактировать.
+              </p>
+            </div>
+          ) : !canEdit && isArchitect ? (
+            <div className="rounded-2xl p-10 text-center" style={{ background: "var(--card-bg)", border: "1px solid rgba(251,191,36,0.2)" }}>
+              <Icon name="Play" size={36} style={{ color: "rgba(251,191,36,0.5)", margin: "0 auto 12px" }} />
+              <div className="font-semibold text-white mb-2">Нажмите «Взять в работу»</div>
+              <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>
+                Чтобы редактировать расчёт — возьмите проект в работу. Это заблокирует его для других.
+              </p>
+              <button onClick={lockProject}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+                style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.3)" }}>
+                <Icon name="Play" size={14} /> Взять в работу
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-2 mb-4 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                {calcSaving ? (
+                  <><Icon name="Loader" size={12} className="animate-spin" /> Сохраняю...</>
+                ) : calcSavedAt ? (
+                  <><Icon name="CheckCircle" size={12} style={{ color: "#00FF88" }} />
+                  <span style={{ color: "#00FF88" }}>Сохранено</span>
+                  <span>· {new Date(calcSavedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span></>
+                ) : null}
+              </div>
+              <ElementsCalcTab
+                info={objectInfo}
+                placed={placedElements}
+                onPlacedChange={handlePlacedChange}
+                token={token}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -1633,6 +1925,7 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
       <ProjectDetail
         project={selectedProject}
         token={token}
+        user={user}
         onBack={() => setSelectedProject(null)}
         onRefresh={load}
       />
@@ -1964,12 +2257,24 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p, i) => {
             const renderImg = p.files?.find(f => f.file_type === "render" || f.file_url.match(/\.(jpg|jpeg|png|webp)$/i));
+            const isLocked = !!p.locked_by;
+            const lockedByMe = !!p.locked_by_me;
+            const noCalc = !p.has_calc;
+            const status = p.calc_status || "draft";
+            const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
+              draft:      { label: "Черновик",          color: "rgba(255,255,255,0.4)", bg: "rgba(255,255,255,0.06)" },
+              in_progress:{ label: "В работе",          color: "#FBBF24",               bg: "rgba(251,191,36,0.12)" },
+              submitted:  { label: "На согласовании",   color: "#00D4FF",               bg: "rgba(0,212,255,0.12)" },
+              approved:   { label: "Согласован",        color: "#00FF88",               bg: "rgba(0,255,136,0.12)" },
+              rejected:   { label: "Отклонён",          color: "#EF4444",               bg: "rgba(239,68,68,0.12)" },
+            };
+            const sc = statusConfig[status] || statusConfig.draft;
             return (
               <div key={p.id}
                 className="rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-[1.02]"
                 style={{
                   background: "var(--card-bg)",
-                  border: "1px solid var(--card-border)",
+                  border: `1px solid ${isLocked && !lockedByMe ? "rgba(239,68,68,0.3)" : status === "approved" ? "rgba(0,255,136,0.25)" : "var(--card-border)"}`,
                   opacity: p.is_active ? 1 : 0.5,
                   animation: `fadeInUp 0.4s ease-out ${i * 0.06}s both`,
                 }}
@@ -1987,22 +2292,48 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                   <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 40%, rgba(10,13,20,0.85) 100%)" }} />
                   <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold font-display"
                     style={{ background: `${p.tag_color}dd`, color: "#0A0D14" }}>{p.tag || "—"}</div>
+
+                  {/* Красная галочка — нет расчёта */}
+                  {noCalc && (
+                    <div className="absolute top-3 right-10 flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                      style={{ background: "rgba(239,68,68,0.85)", color: "#fff", backdropFilter: "blur(4px)" }}>
+                      <Icon name="AlertCircle" size={10} />
+                      Нет расчёта
+                    </div>
+                  )}
+
                   <button onClick={e => openEdit(p, e)}
                     className="absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-110"
                     style={{ background: "rgba(10,13,20,0.6)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
                     <Icon name="Pencil" size={12} />
                   </button>
-                  {p.files?.length > 0 && (
-                    <div className="absolute bottom-3 right-3 px-2 py-0.5 rounded-full text-xs flex items-center gap-1"
-                      style={{ background: "rgba(0,0,0,0.5)", color: "rgba(255,255,255,0.6)", backdropFilter: "blur(4px)" }}>
-                      <Icon name="Image" size={10} />
-                      {p.files.length}
+
+                  {/* Заблокирован другим */}
+                  {isLocked && !lockedByMe && (
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-2"
+                      style={{ background: "rgba(239,68,68,0.7)", backdropFilter: "blur(4px)" }}>
+                      <Icon name="Lock" size={12} style={{ color: "#fff" }} />
+                      <span className="text-xs font-semibold text-white truncate">Редактирует: {p.locked_by_name}</span>
+                    </div>
+                  )}
+                  {/* Заблокирован мной */}
+                  {lockedByMe && (
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-2"
+                      style={{ background: "rgba(251,191,36,0.7)", backdropFilter: "blur(4px)" }}>
+                      <Icon name="LockOpen" size={12} style={{ color: "#000" }} />
+                      <span className="text-xs font-semibold text-black">Вы редактируете</span>
                     </div>
                   )}
                 </div>
 
                 <div className="p-4">
-                  <div className="font-display font-bold text-base text-white mb-0.5">{p.name}</div>
+                  <div className="flex items-start justify-between gap-2 mb-0.5">
+                    <div className="font-display font-bold text-base text-white">{p.name}</div>
+                    <span className="text-xs px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5"
+                      style={{ background: sc.bg, color: sc.color }}>
+                      {sc.label}
+                    </span>
+                  </div>
                   <div className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>{p.type} · {p.area} м² · {p.floors} эт. · {p.rooms} комн.</div>
                   <div className="flex items-center justify-between">
                     <div className="font-display font-bold text-base" style={{ color: p.tag_color }}>
@@ -2010,6 +2341,9 @@ export default function ArchitectCabinet({ user, token }: { user: StaffUser; tok
                     </div>
                     <div className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
                       {p.specs?.length > 0 && <span style={{ color: "var(--neon-green)" }}>📋 ВОР</span>}
+                      {status === "submitted" && <span style={{ color: "#00D4FF" }}>⏳</span>}
+                      {status === "approved" && <span style={{ color: "#00FF88" }}>✓</span>}
+                      {status === "rejected" && <span style={{ color: "#EF4444" }}>✕</span>}
                       <Icon name="ChevronRight" size={14} />
                     </div>
                   </div>

@@ -19,6 +19,18 @@
       "method": "GET",
       "path": "/?action=calc_load&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "lock_status without token",
+      "method": "GET",
+      "path": "/?action=lock_status&project_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "lock without token",
+      "method": "POST",
+      "path": "/?action=lock",
+      "expectedStatus": 401
     }
   ]
 }

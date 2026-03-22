@@ -254,8 +254,34 @@ def handler(event: dict, context) -> dict:
 
     if action == "list":
         cur = conn.cursor()
-        cur.execute(f"SELECT id,name,type,area,floors,rooms,price,tag,tag_color,description,features,is_active,created_by,updated_by,created_at,updated_at,roof_type,foundation_type,wall_type,foundation_material,foundation_depth,ext_wall_material,ext_wall_thickness,int_bearing_material,int_bearing_thickness,partition_material,partition_thickness,floor_slab_material,floor_slab_thickness,floor_slab_area,attic_slab_material,attic_slab_thickness,window_material,window_profile,window_color,window_area,door_info,staircase_info,roof_material,roof_area,roof_style,heating_type,water_supply,sewage,electrical FROM {S}.house_projects ORDER BY created_at DESC")
-        projects = [project_row(r) for r in cur.fetchall()]
+        cur.execute(f"""
+            SELECT hp.id,hp.name,hp.type,hp.area,hp.floors,hp.rooms,hp.price,hp.tag,hp.tag_color,
+                   hp.description,hp.features,hp.is_active,hp.created_by,hp.updated_by,hp.created_at,hp.updated_at,
+                   hp.roof_type,hp.foundation_type,hp.wall_type,hp.foundation_material,hp.foundation_depth,
+                   hp.ext_wall_material,hp.ext_wall_thickness,hp.int_bearing_material,hp.int_bearing_thickness,
+                   hp.partition_material,hp.partition_thickness,hp.floor_slab_material,hp.floor_slab_thickness,
+                   hp.floor_slab_area,hp.attic_slab_material,hp.attic_slab_thickness,hp.window_material,
+                   hp.window_profile,hp.window_color,hp.window_area,hp.door_info,hp.staircase_info,
+                   hp.roof_material,hp.roof_area,hp.roof_style,hp.heating_type,hp.water_supply,hp.sewage,hp.electrical,
+                   hp.calc_status,hp.locked_by,hp.has_calc,hp.assigned_reviewer,hp.review_comment,
+                   ls.full_name as locker_name, rv.full_name as reviewer_name
+            FROM {S}.house_projects hp
+            LEFT JOIN {S}.staff ls ON ls.id = hp.locked_by
+            LEFT JOIN {S}.staff rv ON rv.id = hp.assigned_reviewer
+            ORDER BY hp.created_at DESC""")
+        rows = cur.fetchall()
+        projects = []
+        for r in rows:
+            p = project_row(r)
+            p["calc_status"] = r[45] or "draft"
+            p["locked_by"] = r[46]
+            p["has_calc"] = bool(r[47])
+            p["assigned_reviewer"] = r[48]
+            p["review_comment"] = r[49]
+            p["locked_by_name"] = r[50]
+            p["reviewer_name"] = r[51]
+            p["locked_by_me"] = r[46] == staff["id"]
+            projects.append(p)
         for p in projects:
             cur.execute(f"SELECT id,file_type,file_url,file_name,sort_order FROM {S}.project_files WHERE project_id=%s ORDER BY file_type,sort_order", (p["id"],))
             p["files"] = [{"id":f[0],"file_type":f[1],"file_url":f[2],"file_name":f[3],"sort_order":f[4]} for f in cur.fetchall()]
@@ -331,6 +357,219 @@ def handler(event: dict, context) -> dict:
         log(conn, staff["id"], "house_projects", pid, "update", str(body))
         conn.commit(); cur.close(); conn.close()
         return resp({"ok":True})
+
+    # ── Блокировка / разблокировка проекта ───────────────────────────────────
+
+    if action == "lock":
+        pid = body.get("project_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        if role not in ("architect","constructor","admin","manager"):
+            conn.close(); return resp({"error":"Нет доступа"}, 403)
+        cur = conn.cursor()
+        # Проверяем — не заблокирован ли уже другим
+        cur.execute(f"SELECT locked_by FROM {S}.house_projects WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if row and row[0] and row[0] != staff["id"]:
+            cur.close(); conn.close(); return resp({"error":"Проект уже заблокирован другим сотрудником"}, 409)
+        cur.execute(f"UPDATE {S}.house_projects SET locked_by=%s, locked_at=NOW(), calc_status='in_progress' WHERE id=%s",
+                    (staff["id"], pid))
+        log(conn, staff["id"], "house_projects", pid, "lock", f"Заблокировал: {staff['full_name']}")
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    if action == "unlock":
+        pid = body.get("project_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"SELECT locked_by FROM {S}.house_projects WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        # Снять блокировку может сам заблокировавший или admin/manager
+        if row and row[0] and row[0] != staff["id"] and role not in ("admin","manager"):
+            cur.close(); conn.close(); return resp({"error":"Нет прав снять блокировку"}, 403)
+        cur.execute(f"UPDATE {S}.house_projects SET locked_by=NULL, locked_at=NULL WHERE id=%s", (pid,))
+        log(conn, staff["id"], "house_projects", pid, "unlock", f"Разблокировал: {staff['full_name']}")
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    # ── Получить статус блокировки ────────────────────────────────────────────
+
+    if action == "lock_status":
+        pid = qs.get("project_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT hp.locked_by, hp.locked_at, hp.calc_status, hp.has_calc, "
+            f"hp.assigned_reviewer, hp.submitted_at, hp.review_comment, "
+            f"s.full_name, s.role_code, "
+            f"rv.full_name "
+            f"FROM {S}.house_projects hp "
+            f"LEFT JOIN {S}.staff s ON s.id = hp.locked_by "
+            f"LEFT JOIN {S}.staff rv ON rv.id = hp.assigned_reviewer "
+            f"WHERE hp.id=%s", (pid,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row: return resp({"error":"Не найден"}, 404)
+        locked_by_id, locked_at, calc_status, has_calc, reviewer_id, submitted_at, review_comment, locker_name, locker_role, reviewer_name = row
+        return resp({
+            "locked": locked_by_id is not None,
+            "locked_by_id": locked_by_id,
+            "locked_by_name": locker_name,
+            "locked_by_me": locked_by_id == staff["id"],
+            "locked_at": str(locked_at) if locked_at else None,
+            "calc_status": calc_status or "draft",
+            "has_calc": bool(has_calc),
+            "assigned_reviewer_id": reviewer_id,
+            "assigned_reviewer_name": reviewer_name,
+            "submitted_at": str(submitted_at) if submitted_at else None,
+            "review_comment": review_comment,
+        })
+
+    # ── Отправить на согласование ─────────────────────────────────────────────
+
+    if action == "submit_for_review":
+        pid = body.get("project_id")
+        reviewer_id = body.get("reviewer_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        if role not in ("architect","constructor"):
+            conn.close(); return resp({"error":"Только архитектор или конструктор"}, 403)
+        cur = conn.cursor()
+        # Проверяем что проект заблокирован этим сотрудником
+        cur.execute(f"SELECT locked_by, name FROM {S}.house_projects WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row: cur.close(); conn.close(); return resp({"error":"Проект не найден"}, 404)
+        if row[0] != staff["id"]:
+            cur.close(); conn.close(); return resp({"error":"Проект не заблокирован вами"}, 403)
+        project_name = row[1]
+        cur.execute(
+            f"UPDATE {S}.house_projects SET calc_status='submitted', submitted_by=%s, submitted_at=NOW(), "
+            f"assigned_reviewer=%s WHERE id=%s",
+            (staff["id"], reviewer_id, pid))
+        cur.execute(
+            f"INSERT INTO {S}.project_reviews (project_id, action, staff_id, comment) VALUES (%s,'submitted',%s,%s)",
+            (pid, staff["id"], f"Отправлен на согласование. Руководитель ID: {reviewer_id}"))
+        log(conn, staff["id"], "house_projects", pid, "submit_for_review", project_name)
+        conn.commit(); cur.close()
+
+        # Уведомление в Битрикс если есть webhook
+        reviewer_bitrix_id = None
+        manager_bitrix_ids = []
+        if reviewer_id:
+            cur2 = conn.cursor()
+            cur2.execute(f"SELECT bitrix_user_id FROM {S}.staff WHERE id=%s", (reviewer_id,))
+            rv = cur2.fetchone()
+            if rv: reviewer_bitrix_id = rv[0]
+            cur2.execute(f"SELECT bitrix_user_id FROM {S}.staff WHERE role_code IN ('admin','manager') AND bitrix_user_id IS NOT NULL")
+            manager_bitrix_ids = [r[0] for r in cur2.fetchall()]
+            cur2.close()
+
+        webhook = os.environ.get("BITRIX24_WEBHOOK","").rstrip("/")
+        if webhook and reviewer_bitrix_id:
+            try:
+                desc = (f"[B]Проект:[/B] {project_name}\n"
+                        f"[B]Отправил:[/B] {staff['full_name']}\n\n"
+                        f"Расчёт готов. Требуется согласование или отклонение с комментарием.")
+                fields = {"TITLE": f"Согласование расчёта — {project_name}",
+                          "DESCRIPTION": desc, "RESPONSIBLE_ID": reviewer_bitrix_id,
+                          "PRIORITY": "2"}
+                auditors = [i for i in manager_bitrix_ids if i != reviewer_bitrix_id]
+                if auditors: fields["AUDITORS"] = auditors
+                data = json.dumps({"fields": fields}, ensure_ascii=False).encode()
+                req = urllib.request.Request(f"{webhook}/tasks.task.add.json", data=data,
+                    headers={"Content-Type":"application/json"}, method="POST")
+                urllib.request.urlopen(req, timeout=10)
+            except Exception as e:
+                print(f"[staff-projects] Bitrix notify error: {e}")
+
+        conn.close()
+        return resp({"ok": True})
+
+    # ── Согласовать / Отклонить ───────────────────────────────────────────────
+
+    if action in ("approve", "reject"):
+        pid = body.get("project_id")
+        comment = body.get("comment","").strip()
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        if role not in ("admin","manager"):
+            conn.close(); return resp({"error":"Только руководитель"}, 403)
+        if action == "reject" and not comment:
+            conn.close(); return resp({"error":"Комментарий обязателен при отклонении"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"SELECT name, locked_by FROM {S}.house_projects WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row: cur.close(); conn.close(); return resp({"error":"Не найден"}, 404)
+        project_name, locked_by_id = row
+
+        new_status = "approved" if action == "approve" else "rejected"
+        cur.execute(
+            f"UPDATE {S}.house_projects SET calc_status=%s, reviewed_by=%s, reviewed_at=NOW(), "
+            f"review_comment=%s WHERE id=%s",
+            (new_status, staff["id"], comment, pid))
+        # При отклонении снимаем блокировку — архитектор должен доработать
+        if action == "reject":
+            cur.execute(f"UPDATE {S}.house_projects SET locked_by=NULL, locked_at=NULL WHERE id=%s", (pid,))
+        cur.execute(
+            f"INSERT INTO {S}.project_reviews (project_id, action, staff_id, comment) VALUES (%s,%s,%s,%s)",
+            (pid, action, staff["id"], comment))
+        log(conn, staff["id"], "house_projects", pid, action, f"{project_name}: {comment[:100]}")
+        conn.commit(); cur.close()
+
+        # Уведомить архитектора в Битрикс
+        webhook = os.environ.get("BITRIX24_WEBHOOK","").rstrip("/")
+        if webhook and locked_by_id:
+            try:
+                cur2 = conn.cursor()
+                cur2.execute(f"SELECT bitrix_user_id FROM {S}.staff WHERE id=%s", (locked_by_id,))
+                rv = cur2.fetchone(); cur2.close()
+                if rv and rv[0]:
+                    emoji = "✅" if action == "approve" else "❌"
+                    desc = (f"[B]Проект:[/B] {project_name}\n"
+                            f"[B]Решение:[/B] {'Согласован' if action=='approve' else 'Отклонён'}\n"
+                            f"[B]Руководитель:[/B] {staff['full_name']}\n"
+                            + (f"[B]Комментарий:[/B] {comment}" if comment else ""))
+                    data = json.dumps({"fields": {
+                        "TITLE": f"{emoji} Расчёт {'согласован' if action=='approve' else 'отклонён'} — {project_name}",
+                        "DESCRIPTION": desc, "RESPONSIBLE_ID": rv[0], "PRIORITY": "2"
+                    }}, ensure_ascii=False).encode()
+                    req = urllib.request.Request(f"{webhook}/tasks.task.add.json", data=data,
+                        headers={"Content-Type":"application/json"}, method="POST")
+                    urllib.request.urlopen(req, timeout=10)
+            except Exception as e:
+                print(f"[staff-projects] Bitrix feedback error: {e}")
+
+        conn.close()
+        return resp({"ok": True, "status": new_status})
+
+    # ── Список руководителей для назначения ───────────────────────────────────
+
+    if action == "reviewers_list":
+        cur = conn.cursor()
+        cur.execute(f"SELECT id, full_name, role_code FROM {S}.staff WHERE role_code IN ('admin','manager') ORDER BY full_name")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return resp({"reviewers": [{"id":r[0],"full_name":r[1],"role_code":r[2]} for r in rows]})
+
+    # ── Обновить has_calc (вызывается при изменении расчёта) ──────────────────
+
+    if action == "update_has_calc":
+        pid = body.get("project_id")
+        has = body.get("has_calc", False)
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {S}.house_projects SET has_calc=%s WHERE id=%s", (has, pid))
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    # ── История согласований ──────────────────────────────────────────────────
+
+    if action == "reviews_history":
+        pid = qs.get("project_id")
+        if not pid: conn.close(); return resp({"error":"project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT pr.id, pr.action, pr.comment, pr.created_at, s.full_name "
+            f"FROM {S}.project_reviews pr JOIN {S}.staff s ON s.id=pr.staff_id "
+            f"WHERE pr.project_id=%s ORDER BY pr.created_at DESC", (pid,))
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return resp({"history": [{"id":r[0],"action":r[1],"comment":r[2],"created_at":str(r[3]),"by":r[4]} for r in rows]})
 
     # ── Подбор цен поставщиков к позициям ВОР ────────────────────────────────
 
