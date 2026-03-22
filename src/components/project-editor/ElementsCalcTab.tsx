@@ -22,7 +22,8 @@ type ElementKind =
   | "wall_layer" | "jb_belt"
   | "floor_slab_deck" | "floor_slab_hollow" | "floor_slab_mono" | "floor_slab_wood"
   | "window" | "door"
-  | "roof_pitched" | "roof_flat" | "roof_mansard";
+  | "roof_pitched" | "roof_flat" | "roof_mansard"
+  | "drainage";
 
 interface PlacedElement {
   id: string;
@@ -65,6 +66,7 @@ const LIBRARY: LibItem[] = [
   { kind: "roof_pitched",    group: "Кровля",    label: "Кровля скатная",      icon: "Home",         color: "#ef4444", description: "Двускатная / вальмовая кровля" },
   { kind: "roof_flat",       group: "Кровля",    label: "Кровля плоская",      icon: "Minus",        color: "#ef4444", description: "Плоская эксплуатируемая / неэксплуатируемая" },
   { kind: "roof_mansard",    group: "Кровля",    label: "Кровля мансардная",   icon: "TrendingUp",   color: "#ef4444", description: "Ломаная мансардная кровля" },
+  { kind: "drainage",        group: "Кровля",    label: "Водосточная система",  icon: "Droplets",     color: "#ef4444", description: "Желоба, трубы, воронки, держатели" },
 ];
 
 const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы", "Кровля"];
@@ -117,6 +119,8 @@ function defaultParams(kind: ElementKind, info: ObjectInfo): Record<string, numb
       return { roof_area: area || 0, roofing_material: "Мембрана ПВХ", insulation_thickness: 0.2, screed_thickness: 0.05, slope_layer: "Керамзит" };
     case "roof_mansard":
       return { roof_area: area ? area * 1.4 : 0, roofing_material: "Металлочерепица", insulation_thickness: 0.2, rafter_section_w: 0.05, rafter_section_h: 0.2, rafter_step: 0.6 };
+    case "drainage":
+      return { eaves_perimeter: 0, material: "Сталь оцинкованная", gutter_dia: 125, pipe_dia: 90, downpipe_count: 2, gutter_color: "RAL 8017 Коричневый" };
     default:
       return {};
   }
@@ -418,6 +422,28 @@ function calcVor(kind: ElementKind, p: Record<string, number | string | boolean>
       ];
     }
 
+    case "drainage": {
+      const perim = n("eaves_perimeter");
+      const pipes = n("downpipe_count") || 2;
+      const floorH = 3;
+      const floors = 2;
+      const pipeLen = pipes * floorH * floors;
+      const bracketCount = Math.ceil(perim / 0.6);
+      const clampCount = pipes * Math.ceil(floorH * floors / 1.5);
+      const funnelCount = pipes;
+      const capCount = Math.ceil(perim / 6) * 2;
+      return [
+        { id: id(), section: "Водосток", name: `Желоб Ø${n("gutter_dia")}мм (${p["material"]})`, unit: "п.м", qty: +(perim * 1.05).toFixed(2), note: "с нахлёстом", is_work: false },
+        { id: id(), section: "Водосток", name: `Труба водосточная Ø${n("pipe_dia")}мм`, unit: "п.м", qty: +pipeLen.toFixed(2), note: `${pipes} труб`, is_work: false },
+        { id: id(), section: "Водосток", name: "Держатель желоба", unit: "шт", qty: bracketCount, is_work: false },
+        { id: id(), section: "Водосток", name: "Кронштейн трубы", unit: "шт", qty: clampCount, is_work: false },
+        { id: id(), section: "Водосток", name: "Воронка водосборная", unit: "шт", qty: funnelCount, is_work: false },
+        { id: id(), section: "Водосток", name: "Заглушка желоба", unit: "шт", qty: capCount, is_work: false },
+        { id: id(), section: "Водосток", name: "Угол желоба 90°", unit: "шт", qty: Math.ceil(perim / 10) + 2, is_work: false },
+        { id: id(), section: "Водосток", name: "Монтаж водосточной системы", unit: "п.м", qty: +(perim + pipeLen).toFixed(2), is_work: true },
+      ];
+    }
+
     default:
       return [];
   }
@@ -687,6 +713,16 @@ function ElementParamsForm({ el, onUpdate }: {
         {numField("Сечение стропил (ш)", "rafter_section_w", "м", p, upd)}
         {numField("Сечение стропил (в)", "rafter_section_h", "м", p, upd)}
         {numField("Шаг стропил", "rafter_step", "м", p, upd)}
+      </div>;
+
+    case "drainage":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Периметр карниза", "eaves_perimeter", "п.м", p, upd)}
+        {selField("Материал системы", "material", ["Сталь оцинкованная","Сталь с полимерным покрытием","Медь","Алюминий","Пластик ПВХ"])}
+        {numField("Диаметр желоба", "gutter_dia", "мм", p, upd)}
+        {numField("Диаметр трубы", "pipe_dia", "мм", p, upd)}
+        {numField("Кол-во водосточных труб", "downpipe_count", "шт", p, upd)}
+        {selField("Цвет", "gutter_color", ["RAL 8017 Коричневый","RAL 9003 Белый","RAL 7024 Графит","RAL 3005 Бордо","RAL 6005 Зелёный","RAL 8004 Медно-коричневый"])}
       </div>;
 
     default:
