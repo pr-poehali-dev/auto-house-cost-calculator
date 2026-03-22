@@ -36,10 +36,9 @@ interface StaffContact {
   id: number;
   full_name: string;
   role_code: string;
-  phone: string | null;
   email: string | null;
   bitrix_user_id: number | null;
-  notify_sms: boolean;
+  max_user_id: string | null;
   notify_bitrix: boolean;
 }
 
@@ -483,15 +482,6 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>📱 Телефон (для SMS)</label>
-                          <input
-                            defaultValue={ct.phone || ""}
-                            onChange={e => setContactBuf(b => ({ ...b, phone: e.target.value }))}
-                            placeholder="+79001234567"
-                            className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
-                            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-                        </div>
-                        <div>
                           <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>📧 Email</label>
                           <input
                             defaultValue={ct.email || ""}
@@ -501,7 +491,7 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
                             style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
                         </div>
                         <div>
-                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>🏢 Битрикс24 ID пользователя</label>
+                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>🏢 Битрикс24 ID</label>
                           <input
                             type="number"
                             defaultValue={ct.bitrix_user_id || ""}
@@ -510,27 +500,31 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
                             className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
                             style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
                           <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
-                            Найти в Битриксе: Сотрудники → профиль → цифра в URL (?ID=42)
+                            Профиль → цифра в URL (?ID=42)
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>💬 Max ID (мессенджер)</label>
+                          <input
+                            defaultValue={ct.max_user_id || ""}
+                            onChange={e => setContactBuf(b => ({ ...b, max_user_id: e.target.value || null }))}
+                            placeholder="Будет доступно после создания бота"
+                            disabled
+                            className="w-full px-3 py-2 rounded-xl text-sm outline-none opacity-40"
+                            style={{ background: "rgba(255,255,255,0.04)", border: "1px dashed rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)" }} />
+                          <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.2)" }}>
+                            Подключим когда создадим бота в Max
                           </div>
                         </div>
                         <div>
                           <label className="block text-xs mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>🔔 Каналы уведомлений</label>
-                          <div className="flex flex-col gap-2">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox"
-                                defaultChecked={ct.notify_sms !== false}
-                                onChange={e => setContactBuf(b => ({ ...b, notify_sms: e.target.checked }))}
-                                className="w-4 h-4 rounded" />
-                              <span className="text-sm text-white">SMS уведомления</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox"
-                                defaultChecked={ct.notify_bitrix !== false}
-                                onChange={e => setContactBuf(b => ({ ...b, notify_bitrix: e.target.checked }))}
-                                className="w-4 h-4 rounded" />
-                              <span className="text-sm text-white">Задачи в Битрикс24</span>
-                            </label>
-                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox"
+                              defaultChecked={ct.notify_bitrix !== false}
+                              onChange={e => setContactBuf(b => ({ ...b, notify_bitrix: e.target.checked }))}
+                              className="w-4 h-4 rounded" />
+                            <span className="text-sm text-white">Задачи в Битрикс24</span>
+                          </label>
                         </div>
                       </div>
                       <div className="flex gap-2 pt-1">
@@ -557,22 +551,25 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
                             {ct.role_code}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
-                          <span className="flex items-center gap-1">
-                            <Icon name="Phone" size={11} />
-                            {ct.phone || <span style={{ color: "rgba(255,100,100,0.6)" }}>не указан</span>}
-                          </span>
+                        <div className="flex items-center gap-4 text-xs flex-wrap" style={{ color: "rgba(255,255,255,0.4)" }}>
                           <span className="flex items-center gap-1">
                             <Icon name="Building2" size={11} />
-                            {ct.bitrix_user_id ? `Битрикс ID: ${ct.bitrix_user_id}` : <span style={{ color: "rgba(255,100,100,0.6)" }}>Битрикс не привязан</span>}
+                            {ct.bitrix_user_id
+                              ? <span style={{ color: "var(--neon-cyan)" }}>Битрикс ID: {ct.bitrix_user_id}</span>
+                              : <span style={{ color: "rgba(255,100,100,0.5)" }}>Битрикс не привязан</span>}
                           </span>
-                          <div className="flex items-center gap-2">
-                            {ct.notify_sms && <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: "rgba(0,255,136,0.1)", color: "var(--neon-green)" }}>SMS</span>}
-                            {ct.notify_bitrix && <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)" }}>Битрикс</span>}
-                          </div>
+                          <span className="flex items-center gap-1">
+                            <Icon name="MessageCircle" size={11} />
+                            {ct.max_user_id
+                              ? <span style={{ color: "var(--neon-green)" }}>Max подключён</span>
+                              : <span style={{ color: "rgba(255,255,255,0.2)" }}>Max — скоро</span>}
+                          </span>
+                          {ct.notify_bitrix && (
+                            <span className="px-1.5 py-0.5 rounded" style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)" }}>Битрикс ✓</span>
+                          )}
                         </div>
                       </div>
-                      <button onClick={() => { setEditingContact(ct.id); setContactBuf({ phone: ct.phone, email: ct.email, bitrix_user_id: ct.bitrix_user_id, notify_sms: ct.notify_sms, notify_bitrix: ct.notify_bitrix }); }}
+                      <button onClick={() => { setEditingContact(ct.id); setContactBuf({ email: ct.email, bitrix_user_id: ct.bitrix_user_id, max_user_id: ct.max_user_id, notify_bitrix: ct.notify_bitrix }); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:scale-105"
                         style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
                         <Icon name="Pencil" size={12} />
@@ -590,14 +587,23 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
             </div>
           )}
 
-          {/* Подсказка Битрикс */}
-          <div className="px-5 py-3 flex items-start gap-2"
+          {/* Подсказки */}
+          <div className="px-5 py-3 flex flex-col gap-2"
             style={{ borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(0,212,255,0.03)" }}>
-            <Icon name="Info" size={13} style={{ color: "rgba(0,212,255,0.5)", marginTop: 1, flexShrink: 0 }} />
-            <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-              <span style={{ color: "rgba(0,212,255,0.7)" }}>Как найти Битрикс24 ID:</span> откройте профиль сотрудника в Битриксе → 
-              в адресной строке будет <code style={{ color: "rgba(255,255,255,0.5)" }}>?ID=42</code> — это и есть ID.
-              Снабженцы получают задачу как ответственные, руководители (admin/manager) — как наблюдатели.
+            <div className="flex items-start gap-2">
+              <Icon name="Info" size={13} style={{ color: "rgba(0,212,255,0.5)", marginTop: 1, flexShrink: 0 }} />
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <span style={{ color: "rgba(0,212,255,0.7)" }}>Битрикс24 ID:</span> откройте профиль сотрудника →
+                в адресной строке <code style={{ color: "rgba(255,255,255,0.5)" }}>?ID=42</code>.
+                Снабженцы = ответственные по задаче, руководители (admin/manager) = наблюдатели.
+              </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <Icon name="MessageCircle" size={13} style={{ color: "rgba(168,85,247,0.5)", marginTop: 1, flexShrink: 0 }} />
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
+                <span style={{ color: "rgba(168,85,247,0.7)" }}>Max мессенджер</span> — будет доступен после создания бота.
+                Уведомления через Max подключим отдельно.
+              </div>
             </div>
           </div>
         </div>

@@ -321,12 +321,11 @@ export default function DocUploadManager({ token, projectId, projectName = "Пр
 
       if (r.ok) {
         const res = r.results || {};
-        if (res.sms_sent?.length) log(`📱 SMS отправлено: ${res.sms_sent.join(", ")}`);
-        if (res.sms_failed?.length) log(`⚠️ SMS не отправлено: ${res.sms_failed.map((f: {name: string}) => f.name).join(", ")}`);
-        if (res.bitrix_tasks?.length) log(`✅ Задача в Битрикс24 создана (ID: ${res.bitrix_tasks[0].task_id})`);
+        if (res.bitrix_tasks?.length) log(`✅ Задача в Битрикс24 создана (ID: ${res.bitrix_tasks[0]})`);
         if (res.bitrix_failed?.length) log(`⚠️ Битрикс: ${res.bitrix_failed[0]}`);
-        if (!res.sms_sent?.length && !res.bitrix_tasks?.length) {
-          log("ℹ️ Уведомления отправлены. Укажите телефоны и Битрикс ID сотрудников в настройках для полной работы.");
+        if (res.max_sent?.length) log(`💬 Max уведомление отправлено: ${res.max_sent.join(", ")}`);
+        if (!res.bitrix_tasks?.length && !res.max_sent?.length) {
+          log("ℹ️ Укажите Битрикс24 ID сотрудников в разделе «Администрирование → Уведомления»");
         }
       } else {
         log(`⚠️ ${r.error || "Ошибка отправки уведомлений"}`);
