@@ -1,0 +1,27 @@
+INSERT INTO t_p78845984_auto_house_cost_calc.project_files
+(project_id, file_type, file_url, file_name, sort_order, uploaded_by)
+VALUES
+(13,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/78cbf06d-8777-41b3-ac2a-b4f77560f1dc.jpg','lastochka_side.jpg',2,1),
+(13,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/be36272c-af12-4936-ab0b-1be4b14040c4.jpg','lastochka_rear.jpg',3,1),
+(13,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/8a430597-9ac6-4f0b-842b-8ff230b5d1fe.jpg','lastochka_interior.jpg',4,1),
+(13,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/b50377f7-4197-4316-8254-dd4ee4120e7a.jpg','lastochka_plan.jpg',5,1),
+(14,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/2c41c997-9b52-4b08-84e3-224a10d5a008.jpg','beresta_side.jpg',2,1),
+(14,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/d02f0161-b22f-4390-aeeb-41ebef471cd2.jpg','beresta_rear.jpg',3,1),
+(14,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/0b20880a-9345-461e-9578-4fbdd6033a2a.jpg','beresta_interior.jpg',4,1),
+(14,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/59a10a28-59fa-4408-a13a-b112e6aa64d1.jpg','beresta_plan.jpg',5,1),
+(15,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/6405c867-b6a6-4144-9993-010b4a75bbf7.jpg','usadba_side.jpg',2,1),
+(15,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/98bf6cfe-e716-452e-824a-94c75c3ec16d.jpg','usadba_rear.jpg',3,1),
+(15,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/509d200b-7e9a-4933-ab8f-83318d64a12c.jpg','usadba_interior.jpg',4,1),
+(15,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/2505025d-c482-447b-b02c-41b864281ebd.jpg','usadba_plan.jpg',5,1),
+(16,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/cbf00c81-59d6-4fd6-8556-863155d3e66e.jpg','sosnovy_side.jpg',2,1),
+(16,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/6188ad42-fe8c-401a-8bb7-fb57d31de70a.jpg','sosnovy_rear.jpg',3,1),
+(16,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/cab735ce-e05c-4e3f-933d-d1b460674d2d.jpg','sosnovy_interior.jpg',4,1),
+(16,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/4e0d4002-0668-4000-918f-a6e4bb231448.jpg','sosnovy_plan.jpg',5,1),
+(17,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/1b608218-9d35-4033-a6b5-9d521105ea63.jpg','modern_side.jpg',2,1),
+(17,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/6c0bd77c-626c-43fd-9dd5-31684ce1a607.jpg','modern_roof.jpg',3,1),
+(17,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/ee968d2a-7650-4a52-aaf6-ffc9e44a462f.jpg','modern_interior.jpg',4,1),
+(17,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/98d0b0ff-e1fe-442c-9745-894aeb135c8c.jpg','modern_plan.jpg',5,1),
+(18,'facade','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/ef6bb687-604a-4b37-8bb3-7fc890bdf052.jpg','alpina_side.jpg',2,1),
+(18,'section','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/08029411-e323-4084-be70-9eaa92e39c9d.jpg','alpina_rear.jpg',3,1),
+(18,'render','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/9b9ca66e-1063-4a6f-abf6-44f42cb00981.jpg','alpina_interior.jpg',4,1),
+(18,'plan','https://cdn.poehali.dev/projects/75f2cb20-c283-4e27-9d0d-76895755032c/files/d3e8d86f-3010-4aed-ae75-a97db4835194.jpg','alpina_plan.jpg',5,1);
