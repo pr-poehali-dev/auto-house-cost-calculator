@@ -23,7 +23,8 @@ type ElementKind =
   | "floor_slab_deck" | "floor_slab_hollow" | "floor_slab_mono" | "floor_slab_wood"
   | "window" | "door"
   | "roof_pitched" | "roof_flat" | "roof_mansard"
-  | "drainage";
+  | "drainage"
+  | "custom";
 
 interface PlacedElement {
   id: string;
@@ -901,9 +902,10 @@ function PlacedCard({
   onRename: (label: string) => void;
   onVorOverride: (rows: VorRow[]) => void;
 }) {
+  const isCustom = el.kind === "custom";
   const [open, setOpen] = useState(true);
-  const [tab, setTab] = useState<"params" | "vor" | "edit">("params");
-  const [editingLabel, setEditingLabel] = useState(false);
+  const [tab, setTab] = useState<"params" | "vor" | "edit">(isCustom ? "edit" : "params");
+  const [editingLabel, setEditingLabel] = useState(isCustom);
   const [labelBuf, setLabelBuf] = useState(el.label);
 
   // Если vor в элементе заполнен — используем его (кастомный), иначе считаем из параметров
@@ -969,18 +971,20 @@ function PlacedCard({
         <div className="px-4 pb-4 pt-3">
           {/* Переключатель вкладок */}
           <div className="flex gap-1 p-0.5 rounded-lg mb-4 w-fit" style={{ background: "rgba(255,255,255,0.04)" }}>
-            {(["params", "vor", "edit"] as const).map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                style={{
-                  background: tab === t ? libItem.color : "transparent",
-                  color: tab === t ? "#fff" : "rgba(255,255,255,0.45)",
-                }}>
-                {t === "params" ? "Параметры"
-                  : t === "vor" ? `ВОР (${vor.length})`
-                  : <span className="flex items-center gap-1"><Icon name="ListChecks" size={11} />Состав</span>}
-              </button>
-            ))}
+            {(["params", "vor", "edit"] as const)
+              .filter(t => !(isCustom && t === "params"))
+              .map(t => (
+                <button key={t} onClick={() => setTab(t)}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                  style={{
+                    background: tab === t ? libItem.color : "transparent",
+                    color: tab === t ? "#fff" : "rgba(255,255,255,0.45)",
+                  }}>
+                  {t === "params" ? "Параметры"
+                    : t === "vor" ? `ВОР (${vor.length})`
+                    : <span className="flex items-center gap-1"><Icon name="ListChecks" size={11} />Состав</span>}
+                </button>
+              ))}
           </div>
 
           {tab === "params" && <ElementParamsForm el={el} onUpdate={onUpdate} />}
@@ -1047,6 +1051,19 @@ export default function ElementsCalcTab({
       label: lib.label,
       params: defaultParams(lib.kind, info),
       vor: [],
+    };
+    onPlacedChange([...placed, el]);
+  };
+
+  const addCustomElement = () => {
+    const el: PlacedElement = {
+      id: `${uid}-${Date.now()}`,
+      kind: "custom" as ElementKind,
+      label: "Новый элемент",
+      params: {},
+      vor: [
+        { id: Math.random().toString(36).slice(2), section: "Прочее", name: "", unit: "шт", qty: 0, is_work: false },
+      ],
     };
     onPlacedChange([...placed, el]);
   };
@@ -1121,6 +1138,22 @@ export default function ElementsCalcTab({
               </div>
             ))}
           </div>
+
+          {/* Свой элемент */}
+          <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <button onClick={() => addCustomElement()}
+              className="w-full flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all hover:scale-[1.02] group"
+              style={{ border: "1px dashed rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.02)" }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(255,255,255,0.08)" }}>
+                <Icon name="Plus" size={14} style={{ color: "rgba(255,255,255,0.5)" }} />
+              </div>
+              <div className="min-w-0 text-left">
+                <div className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.6)" }}>Свой элемент</div>
+                <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>Заполнить состав вручную</div>
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* ── Правая колонка: размещённые элементы ── */}
@@ -1158,6 +1191,24 @@ export default function ElementsCalcTab({
                   </div>
                 );
               })}
+
+              {/* Кастомные элементы */}
+              {placed.filter(e => e.kind === "custom").length > 0 && (
+                <div className="mb-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full" style={{ background: "rgba(255,255,255,0.4)" }} />
+                    <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.5)" }}>Прочее</span>
+                  </div>
+                  {placed.filter(e => e.kind === "custom").map(el => (
+                    <PlacedCard key={el.id} el={el}
+                      libItem={{ kind: "custom", group: "Прочее", label: el.label, icon: "PenLine", color: "#9ca3af", description: "" }}
+                      onUpdate={p => updateEl(el.id, p)}
+                      onRemove={() => removeEl(el.id)}
+                      onRename={label => renameEl(el.id, label)}
+                      onVorOverride={vor => overrideVor(el.id, vor)} />
+                  ))}
+                </div>
+              )}
 
               {/* Сводная ВОР */}
               {allVor.length > 0 && (
