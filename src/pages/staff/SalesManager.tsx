@@ -1507,6 +1507,7 @@ function HistoryTab({ order, token, onRefresh }: { order: Order; token: string; 
 // ─── CRM URL ──────────────────────────────────────────────────────────────────
 const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
 const AVITO_SYNC_URL = "https://functions.poehali.dev/511c97fe-5f02-4410-b267-767e247c4c5f";
+const EMAIL_SYNC_URL = "https://functions.poehali.dev/47124c44-a436-4db5-9fdf-542cf14bb7cf";
 
 // ─── CRM Types ────────────────────────────────────────────────────────────────
 interface Lead {
@@ -1937,6 +1938,8 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
   const [stats, setStats] = useState<Record<string,number>>({});
   const [avitoSyncing, setAvitoSyncing] = useState(false);
   const [avitoMsg, setAvitoMsg] = useState("");
+  const [emailSyncing, setEmailSyncing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState("");
 
   // Новый лид
   const [newForm, setNewForm] = useState({ name: "", phone: "", email: "", source_id: "", stage: "new" });
@@ -1973,6 +1976,23 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
     }
     setAvitoSyncing(false);
     setTimeout(() => setAvitoMsg(""), 5000);
+  };
+
+  const syncEmail = async () => {
+    setEmailSyncing(true); setEmailMsg("");
+    try {
+      const r = await apiFetch(EMAIL_SYNC_URL, {}, token);
+      if (r.ok) {
+        setEmailMsg(r.created > 0 ? `✅ Email: ${r.created} новых лидов` : "Email: новых писем нет");
+        if (r.created > 0) load();
+      } else {
+        setEmailMsg(`⚠️ ${r.error || "Ошибка"}`);
+      }
+    } catch {
+      setEmailMsg("⚠️ Ошибка подключения");
+    }
+    setEmailSyncing(false);
+    setTimeout(() => setEmailMsg(""), 5000);
   };
 
   const createLead = async () => {
@@ -2016,6 +2036,12 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
               <Icon name="List" size={13} />
             </button>
           </div>
+          <button onClick={syncEmail} disabled={emailSyncing}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+            style={{ background: "rgba(0,212,255,0.1)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.25)" }}>
+            <Icon name={emailSyncing ? "Loader" : "Mail"} size={13} className={emailSyncing ? "animate-spin" : ""} />
+            {emailSyncing ? "Email..." : "Email"}
+          </button>
           <button onClick={syncAvito} disabled={avitoSyncing}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
             style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.25)" }}>
@@ -2029,10 +2055,20 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
           </button>
         </div>
       </div>
-      {avitoMsg && (
-        <div className="px-4 py-2.5 rounded-xl text-sm"
-          style={{ background: avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.08)" : "rgba(251,191,36,0.08)", color: avitoMsg.startsWith("✅") ? "var(--neon-green)" : "#FBBF24", border: `1px solid ${avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.2)" : "rgba(251,191,36,0.2)"}` }}>
-          {avitoMsg}
+      {(avitoMsg || emailMsg) && (
+        <div className="flex flex-col gap-2">
+          {emailMsg && (
+            <div className="px-4 py-2.5 rounded-xl text-sm"
+              style={{ background: emailMsg.startsWith("✅") ? "rgba(0,212,255,0.08)" : "rgba(251,191,36,0.08)", color: emailMsg.startsWith("✅") ? "var(--neon-cyan)" : "#FBBF24", border: `1px solid ${emailMsg.startsWith("✅") ? "rgba(0,212,255,0.2)" : "rgba(251,191,36,0.2)"}` }}>
+              {emailMsg}
+            </div>
+          )}
+          {avitoMsg && (
+            <div className="px-4 py-2.5 rounded-xl text-sm"
+              style={{ background: avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.08)" : "rgba(251,191,36,0.08)", color: avitoMsg.startsWith("✅") ? "var(--neon-green)" : "#FBBF24", border: `1px solid ${avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.2)" : "rgba(251,191,36,0.2)"}` }}>
+              {avitoMsg}
+            </div>
+          )}
         </div>
       )}
 
