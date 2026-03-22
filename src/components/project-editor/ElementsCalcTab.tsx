@@ -1135,12 +1135,67 @@ function PlacedCard({
 
 function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }
 
-function FullVorTable({ rows, onPriceChange }: {
+const MATERIALS_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
+
+interface PriceMatch {
+  vor_id: string;
+  vor_name: string;
+  matched_name: string | null;
+  matched_unit: string;
+  category: string;
+  price: number | null;
+  best_price: number | null;
+  base_price: number | null;
+  supplier_name: string | null;
+  updated_at: string | null;
+  score: number;
+}
+
+function FullVorTable({ rows, onPriceChange, token }: {
   rows: VorRow[];
   onPriceChange: (id: string, price: number) => void;
+  token: string;
 }) {
   const [showPrices, setShowPrices] = useState(true);
+  const [matching, setMatching] = useState(false);
+  const [matchResults, setMatchResults] = useState<PriceMatch[]>([]);
+  const [matchMsg, setMatchMsg] = useState("");
   const sections = [...new Set(rows.map(r => r.section))];
+
+  const fetchPricesFromDB = async () => {
+    if (!rows.length) return;
+    setMatching(true);
+    setMatchMsg("");
+    setMatchResults([]);
+    const items = rows.map(r => ({ id: r.id, name: r.name, unit: r.unit }));
+    const res = await fetch(`${MATERIALS_URL}?action=price_match`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Auth-Token": token },
+      body: JSON.stringify({ items }),
+    }).then(r => r.json());
+    setMatching(false);
+    const matches: PriceMatch[] = res.matches || [];
+    setMatchResults(matches);
+    const found = matches.filter(m => m.price && m.price > 0);
+    if (found.length === 0) {
+      setMatchMsg("Совпадений в базе не найдено — введите цены вручную");
+      return;
+    }
+    setMatchMsg(`Найдено совпадений: ${found.length} из ${rows.length}`);
+  };
+
+  const applyAllMatched = () => {
+    matchResults.forEach(m => {
+      if (m.price && m.price > 0) onPriceChange(m.vor_id, m.price);
+    });
+    setMatchResults([]);
+    setMatchMsg(`✓ Цены применены`);
+  };
+
+  const applyOne = (m: PriceMatch) => {
+    if (m.price) onPriceChange(m.vor_id, m.price);
+    setMatchResults(prev => prev.filter(r => r.vor_id !== m.vor_id));
+  };
 
   const totalMat = rows.filter(r => !r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
   const totalWork = rows.filter(r => r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
@@ -1174,18 +1229,78 @@ function FullVorTable({ rows, onPriceChange }: {
               <div className="font-display font-bold text-lg" style={{ color: "#00FF88" }}>{fmt(totalAll)} ₽</div>
             </div>
           )}
-          <button onClick={() => setShowPrices(v => !v)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-            style={{
-              background: showPrices ? "rgba(0,255,136,0.15)" : "rgba(255,255,255,0.06)",
-              color: showPrices ? "#00FF88" : "rgba(255,255,255,0.5)",
-              border: `1px solid ${showPrices ? "rgba(0,255,136,0.3)" : "rgba(255,255,255,0.1)"}`,
-            }}>
-            <Icon name={showPrices ? "EyeOff" : "Eye"} size={12} />
-            {showPrices ? "Скрыть цены" : "Ввести цены"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchPricesFromDB}
+              disabled={matching}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all hover:scale-105 disabled:opacity-60"
+              style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.3)" }}
+              title="Подобрать цены из базы материалов автоматически">
+              <Icon name={matching ? "Loader" : "Database"} size={12} className={matching ? "animate-spin" : ""} />
+              {matching ? "Ищу..." : "Цены из базы"}
+            </button>
+            <button onClick={() => setShowPrices(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{
+                background: showPrices ? "rgba(0,255,136,0.15)" : "rgba(255,255,255,0.06)",
+                color: showPrices ? "#00FF88" : "rgba(255,255,255,0.5)",
+                border: `1px solid ${showPrices ? "rgba(0,255,136,0.3)" : "rgba(255,255,255,0.1)"}`,
+              }}>
+              <Icon name={showPrices ? "EyeOff" : "Eye"} size={12} />
+              {showPrices ? "Скрыть цены" : "Ввести цены"}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Панель результатов подбора цен */}
+      {(matchMsg || matchResults.length > 0) && (
+        <div className="px-5 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(251,191,36,0.04)" }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold" style={{ color: "#FBBF24" }}>
+              {matchMsg}
+            </span>
+            {matchResults.filter(m => m.price && m.price > 0).length > 0 && (
+              <button onClick={applyAllMatched}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                style={{ background: "#FBBF24", color: "#000" }}>
+                <Icon name="CheckCheck" size={12} />
+                Применить все ({matchResults.filter(m => m.price && m.price > 0).length})
+              </button>
+            )}
+          </div>
+          {matchResults.filter(m => m.price && m.price > 0).length > 0 && (
+            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+              {matchResults.filter(m => m.price && m.price > 0).map(m => (
+                <div key={m.vor_id} className="flex items-center gap-3 px-3 py-2 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white truncate">{m.vor_name}</div>
+                    <div className="text-xs truncate mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      → {m.matched_name}
+                      {m.supplier_name && <span className="ml-1.5" style={{ color: "#00D4FF" }}>· {m.supplier_name}</span>}
+                      {m.updated_at && <span className="ml-1.5" style={{ color: "rgba(255,255,255,0.25)" }}>· {new Date(m.updated_at).toLocaleDateString("ru-RU")}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="font-mono font-semibold text-xs" style={{ color: "#FBBF24" }}>
+                      {fmt(m.price!)} ₽/{m.matched_unit}
+                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.35)" }}>
+                      {Math.round(m.score * 100)}%
+                    </span>
+                    <button onClick={() => applyOne(m)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                      style={{ background: "rgba(251,191,36,0.2)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.3)" }}>
+                      Применить
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Таблица по разделам */}
       <div className="overflow-x-auto">
@@ -1367,10 +1482,12 @@ export default function ElementsCalcTab({
   info,
   placed,
   onPlacedChange,
+  token,
 }: {
   info: ObjectInfo;
   placed: PlacedElement[];
   onPlacedChange: (els: PlacedElement[]) => void;
+  token: string;
 }) {
   const uid = useId();
 
@@ -1557,7 +1674,7 @@ export default function ElementsCalcTab({
 
               {/* Полная ВОР со сметой */}
               {allVor.length > 0 && (
-                <FullVorTable rows={allVor} onPriceChange={handlePriceChange} />
+                <FullVorTable rows={allVor} onPriceChange={handlePriceChange} token={token} />
               )}
             </>
           )}

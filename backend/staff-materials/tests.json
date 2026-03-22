@@ -18,6 +18,13 @@
       "path": "/?action=ai_search",
       "body": {"query": "утеплитель"},
       "expectedStatus": 401
+    },
+    {
+      "name": "price_match without token returns 401",
+      "method": "POST",
+      "path": "/?action=price_match",
+      "body": {"items": [{"id": "1", "name": "Бетон B25", "unit": "м³"}]},
+      "expectedStatus": 401
     }
   ]
 }

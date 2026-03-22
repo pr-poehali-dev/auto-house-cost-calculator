@@ -370,5 +370,85 @@ def handler(event: dict, context) -> dict:
         conn.close()
         return resp({"items": top[:20], "ai_reply": "Показаны наиболее подходящие результаты.", "mode": "text"})
 
+    # ── POST подбор цен для ВОР ───────────────────────────────────────────────
+    # Принимает список {id, name, unit} из ВОР, возвращает лучшие цены из базы
+    if method == "POST" and action == "price_match":
+        items = body.get("items", [])
+        if not items:
+            conn.close(); return resp({"matches": []})
+
+        cur = conn.cursor()
+        # Загружаем все активные материалы с ценами
+        cur.execute(
+            f"""SELECT m.id, m.name, m.unit, m.category,
+                       COALESCE(m.best_price, m.price_per_unit) AS price,
+                       m.best_price,
+                       m.price_per_unit,
+                       sup.company_name AS supplier_name,
+                       m.best_price_updated_at
+                FROM {S}.materials m
+                LEFT JOIN {S}.suppliers sup ON sup.id = m.best_price_supplier_id
+                WHERE m.is_active = TRUE
+                  AND (m.best_price > 0 OR m.price_per_unit > 0)
+                ORDER BY m.category, m.name"""
+        )
+        db_mats = cur.fetchall()
+        cur.close()
+
+        def normalize(s):
+            import re
+            return re.sub(r'[^а-яёa-z0-9]', ' ', s.lower()).split()
+
+        def score(vor_words, mat_words):
+            if not vor_words or not mat_words: return 0
+            hits = sum(1 for w in vor_words if any(w in mw or mw in w for mw in mat_words))
+            return hits / max(len(vor_words), 1)
+
+        results = []
+        for item in items:
+            vor_name = item.get("name", "")
+            vor_id = item.get("id", "")
+            vor_unit = item.get("unit", "")
+            vor_words = normalize(vor_name)
+
+            best = None
+            best_score = 0.0
+            for row in db_mats:
+                mat_words = normalize(row[1])
+                s = score(vor_words, mat_words)
+                # Бонус за совпадение единицы
+                if vor_unit and row[2] and vor_unit.lower() == row[2].lower():
+                    s += 0.1
+                if s > best_score and s >= 0.3:
+                    best_score = s
+                    best = row
+
+            if best:
+                price = float(best[4]) if best[4] else 0
+                results.append({
+                    "vor_id": vor_id,
+                    "vor_name": vor_name,
+                    "matched_name": best[1],
+                    "matched_unit": best[2],
+                    "category": best[3],
+                    "price": price,
+                    "best_price": float(best[5]) if best[5] else None,
+                    "base_price": float(best[6]) if best[6] else None,
+                    "supplier_name": best[7],
+                    "updated_at": str(best[8]) if best[8] else None,
+                    "score": round(best_score, 2),
+                })
+            else:
+                results.append({
+                    "vor_id": vor_id,
+                    "vor_name": vor_name,
+                    "matched_name": None,
+                    "price": None,
+                    "score": 0,
+                })
+
+        conn.close()
+        return resp({"matches": results})
+
     conn.close()
     return resp({"error":"Not found"}, 404)

@@ -1413,6 +1413,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
             info={objectInfo}
             placed={placedElements}
             onPlacedChange={handlePlacedChange}
+            token={token}
           />
         </div>
       )}
