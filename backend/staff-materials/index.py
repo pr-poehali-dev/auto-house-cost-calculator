@@ -370,20 +370,22 @@ def handler(event: dict, context) -> dict:
         conn.close()
         return resp({"items": top[:20], "ai_reply": "Показаны наиболее подходящие результаты.", "mode": "text"})
 
-    # ── POST подбор цен для ВОР ───────────────────────────────────────────────
-    # Принимает список {id, name, unit} из ВОР, возвращает лучшие цены из базы
+    # ── POST AI-подбор цен для ВОР ────────────────────────────────────────────
+    # Принимает список {id, name, unit} из ВОР, возвращает цены через DeepSeek
     if method == "POST" and action == "price_match":
         items = body.get("items", [])
         if not items:
             conn.close(); return resp({"matches": []})
 
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if not api_key:
+            conn.close(); return resp({"error": "AI недоступен"}, 503)
+
         cur = conn.cursor()
-        # Загружаем все активные материалы с ценами
+        # Загружаем каталог: материалы с ценами, группируем по категории
         cur.execute(
             f"""SELECT m.id, m.name, m.unit, m.category,
                        COALESCE(m.best_price, m.price_per_unit) AS price,
-                       m.best_price,
-                       m.price_per_unit,
                        sup.company_name AS supplier_name,
                        m.best_price_updated_at
                 FROM {S}.materials m
@@ -395,60 +397,129 @@ def handler(event: dict, context) -> dict:
         db_mats = cur.fetchall()
         cur.close()
 
-        def normalize(s):
-            import re
-            return re.sub(r'[^а-яёa-z0-9]', ' ', s.lower()).split()
+        # Делаем пре-фильтр по категориям чтобы не гнать 600 строк в AI
+        # Определяем релевантные категории по ключевым словам из ВОР
+        vor_text = " ".join(it.get("name","") for it in items).lower()
+        cat_keywords = {
+            "Фундамент": ["бетон","арматура","свая","щебень","песок","опалубка","фундамент","гидроизол"],
+            "Стены и перекрытия": ["газоблок","кирпич","плита","профлист","балк","перекрыт","стен","пояс"],
+            "Кровля": ["металлочерепица","профнастил","мембран","стропил","обрешётк","утеплит","кровел"],
+            "Водосточные системы": ["желоб","труб","водосточ","держатель","воронк"],
+            "Электрика": ["кабель","автомат","узо","розетк","выключател","щит","светильник","гофр"],
+            "Дерево и пиломатериалы": ["доска","брус","балк","дерев"],
+            "Утеплители": ["утеплит","пенопласт","минват","рокву"],
+            "Металлопрокат": ["уголок","полоса","швелл","металл"],
+        }
+        relevant_cats = set()
+        for cat, keywords in cat_keywords.items():
+            if any(kw in vor_text for kw in keywords):
+                relevant_cats.add(cat)
+        # Если ничего не подошло — берём все
+        if not relevant_cats:
+            relevant_cats = set(r[3] for r in db_mats)
 
-        def score(vor_words, mat_words):
-            if not vor_words or not mat_words: return 0
-            hits = sum(1 for w in vor_words if any(w in mw or mw in w for mw in mat_words))
-            return hits / max(len(vor_words), 1)
+        # Фильтруем каталог по релевантным категориям (максимум 150 строк для AI)
+        filtered = [r for r in db_mats if r[3] in relevant_cats][:150]
+        if not filtered:
+            filtered = list(db_mats[:150])
 
-        results = []
-        for item in items:
-            vor_name = item.get("name", "")
-            vor_id = item.get("id", "")
-            vor_unit = item.get("unit", "")
-            vor_words = normalize(vor_name)
+        # Формируем каталог для AI
+        catalog_lines = "\n".join(
+            f"{i+1}. [{r[3]}] {r[1]} ({r[2]}) — {round(float(r[4]))} ₽"
+            + (f" [{r[5]}]" if r[5] else "")
+            for i, r in enumerate(filtered)
+        )
 
-            best = None
-            best_score = 0.0
-            for row in db_mats:
-                mat_words = normalize(row[1])
-                s = score(vor_words, mat_words)
-                # Бонус за совпадение единицы
-                if vor_unit and row[2] and vor_unit.lower() == row[2].lower():
-                    s += 0.1
-                if s > best_score and s >= 0.3:
-                    best_score = s
-                    best = row
+        # Формируем список позиций ВОР
+        vor_lines = "\n".join(
+            f"{i+1}. {it.get('name','')} ({it.get('unit','')})"
+            for i, it in enumerate(items)
+        )
 
-            if best:
-                price = float(best[4]) if best[4] else 0
-                results.append({
-                    "vor_id": vor_id,
-                    "vor_name": vor_name,
-                    "matched_name": best[1],
-                    "matched_unit": best[2],
-                    "category": best[3],
-                    "price": price,
-                    "best_price": float(best[5]) if best[5] else None,
-                    "base_price": float(best[6]) if best[6] else None,
-                    "supplier_name": best[7],
-                    "updated_at": str(best[8]) if best[8] else None,
-                    "score": round(best_score, 2),
+        prompt = f"""Ты — эксперт по строительным материалам. Твоя задача: сопоставить позиции ведомости объёмов работ (ВОР) с позициями из каталога базы цен.
+
+ПОЗИЦИИ ВОР (нужно найти цены):
+{vor_lines}
+
+КАТАЛОГ БАЗы ЦЕН (пронумерованный):
+{catalog_lines}
+
+Правила сопоставления:
+- Сопоставляй по смыслу, а не по точному тексту (синонимы, сокращения, разные марки)
+- Учитывай единицы измерения — если ед. разные, укажи коэффициент пересчёта
+- Для работ (монтаж, устройство, бурение) — цены в каталоге нет, ставь price=null
+- Если несколько вариантов — выбери наиболее подходящий по смыслу
+
+Верни ТОЛЬКО JSON массив (без пояснений):
+[
+  {{
+    "vor_index": 1,
+    "catalog_index": 5,
+    "price": 1200.0,
+    "unit_ratio": 1.0,
+    "note": "точное совпадение"
+  }},
+  {{
+    "vor_index": 2,
+    "catalog_index": null,
+    "price": null,
+    "unit_ratio": null,
+    "note": "работа, цена не в каталоге"
+  }}
+]
+
+vor_index — номер позиции ВОР (1-based)
+catalog_index — номер из каталога (1-based) или null
+price — цена за единицу ВОР в ₽ (с учётом unit_ratio) или null
+unit_ratio — коэффициент (например 1000 если каталог в кг а ВОР в т) или 1.0
+note — краткое пояснение (макс 60 символов)"""
+
+        try:
+            data = json.dumps({
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 3000,
+            }, ensure_ascii=False).encode()
+            req = urllib.request.Request(
+                "https://api.deepseek.com/v1/chat/completions", data=data,
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=45) as r:
+                result = json.loads(r.read())
+            content = result["choices"][0]["message"]["content"].strip()
+            # Извлекаем JSON массив
+            match = re.search(r'\[.*\]', content, re.DOTALL)
+            if not match:
+                conn.close(); return resp({"error": "AI вернул неожиданный формат"}, 500)
+
+            ai_rows = json.loads(match.group())
+            matches = []
+            for row in ai_rows:
+                vi = row.get("vor_index", 0) - 1
+                ci = row.get("catalog_index")
+                if vi < 0 or vi >= len(items):
+                    continue
+                item = items[vi]
+                cat_row = filtered[ci - 1] if ci and 1 <= ci <= len(filtered) else None
+                matches.append({
+                    "vor_id": item.get("id", ""),
+                    "vor_name": item.get("name", ""),
+                    "matched_name": cat_row[1] if cat_row else None,
+                    "matched_unit": cat_row[2] if cat_row else None,
+                    "category": cat_row[3] if cat_row else None,
+                    "price": float(row["price"]) if row.get("price") else None,
+                    "unit_ratio": row.get("unit_ratio", 1.0),
+                    "supplier_name": cat_row[5] if cat_row else None,
+                    "updated_at": str(cat_row[6]) if cat_row and cat_row[6] else None,
+                    "note": row.get("note", ""),
                 })
-            else:
-                results.append({
-                    "vor_id": vor_id,
-                    "vor_name": vor_name,
-                    "matched_name": None,
-                    "price": None,
-                    "score": 0,
-                })
+            conn.close()
+            return resp({"matches": matches, "mode": "ai"})
 
-        conn.close()
-        return resp({"matches": results})
+        except Exception as e:
+            conn.close()
+            return resp({"error": f"AI ошибка: {str(e)}"}, 500)
 
     conn.close()
     return resp({"error":"Not found"}, 404)

@@ -1141,14 +1141,13 @@ interface PriceMatch {
   vor_id: string;
   vor_name: string;
   matched_name: string | null;
-  matched_unit: string;
-  category: string;
+  matched_unit: string | null;
+  category: string | null;
   price: number | null;
-  best_price: number | null;
-  base_price: number | null;
+  unit_ratio: number | null;
   supplier_name: string | null;
   updated_at: string | null;
-  score: number;
+  note: string;
 }
 
 function FullVorTable({ rows, onPriceChange, token }: {
@@ -1165,23 +1164,29 @@ function FullVorTable({ rows, onPriceChange, token }: {
   const fetchPricesFromDB = async () => {
     if (!rows.length) return;
     setMatching(true);
-    setMatchMsg("");
+    setMatchMsg("ИИ анализирует позиции ВОР и подбирает цены из базы...");
     setMatchResults([]);
     const items = rows.map(r => ({ id: r.id, name: r.name, unit: r.unit }));
-    const res = await fetch(`${MATERIALS_URL}?action=price_match`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Auth-Token": token },
-      body: JSON.stringify({ items }),
-    }).then(r => r.json());
-    setMatching(false);
-    const matches: PriceMatch[] = res.matches || [];
-    setMatchResults(matches);
-    const found = matches.filter(m => m.price && m.price > 0);
-    if (found.length === 0) {
-      setMatchMsg("Совпадений в базе не найдено — введите цены вручную");
-      return;
+    try {
+      const res = await fetch(`${MATERIALS_URL}?action=price_match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Auth-Token": token },
+        body: JSON.stringify({ items }),
+      }).then(r => r.json());
+      setMatching(false);
+      if (res.error) { setMatchMsg(`Ошибка: ${res.error}`); return; }
+      const matches: PriceMatch[] = res.matches || [];
+      setMatchResults(matches);
+      const found = matches.filter(m => m.price && m.price > 0);
+      if (found.length === 0) {
+        setMatchMsg("ИИ не нашёл совпадений — введите цены вручную");
+        return;
+      }
+      setMatchMsg(`ИИ подобрал цены: ${found.length} из ${rows.length} позиций`);
+    } catch {
+      setMatching(false);
+      setMatchMsg("Ошибка соединения");
     }
-    setMatchMsg(`Найдено совпадений: ${found.length} из ${rows.length}`);
   };
 
   const applyAllMatched = () => {
@@ -1257,9 +1262,12 @@ function FullVorTable({ rows, onPriceChange, token }: {
       {(matchMsg || matchResults.length > 0) && (
         <div className="px-5 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(251,191,36,0.04)" }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold" style={{ color: "#FBBF24" }}>
-              {matchMsg}
-            </span>
+            <div className="flex items-center gap-2">
+              {matching && <Icon name="Loader" size={12} style={{ color: "#FBBF24" }} className="animate-spin" />}
+              <span className="text-xs font-semibold" style={{ color: "#FBBF24" }}>
+                {matchMsg}
+              </span>
+            </div>
             {matchResults.filter(m => m.price && m.price > 0).length > 0 && (
               <button onClick={applyAllMatched}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
@@ -1276,23 +1284,31 @@ function FullVorTable({ rows, onPriceChange, token }: {
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs text-white truncate">{m.vor_name}</div>
-                    <div className="text-xs truncate mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
-                      → {m.matched_name}
-                      {m.supplier_name && <span className="ml-1.5" style={{ color: "#00D4FF" }}>· {m.supplier_name}</span>}
-                      {m.updated_at && <span className="ml-1.5" style={{ color: "rgba(255,255,255,0.25)" }}>· {new Date(m.updated_at).toLocaleDateString("ru-RU")}</span>}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {m.matched_name && (
+                        <span className="text-xs truncate" style={{ color: "rgba(255,255,255,0.45)" }}>→ {m.matched_name}</span>
+                      )}
+                      {m.supplier_name && (
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(0,212,255,0.1)", color: "#00D4FF" }}>{m.supplier_name}</span>
+                      )}
+                      {m.unit_ratio && m.unit_ratio !== 1 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(168,85,247,0.12)", color: "#a78bfa" }}>
+                          ×{m.unit_ratio}
+                        </span>
+                      )}
+                      {m.note && (
+                        <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>{m.note}</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="font-mono font-semibold text-xs" style={{ color: "#FBBF24" }}>
-                      {fmt(m.price!)} ₽/{m.matched_unit}
-                    </span>
-                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.35)" }}>
-                      {Math.round(m.score * 100)}%
+                    <span className="font-mono font-semibold text-sm" style={{ color: "#FBBF24" }}>
+                      {fmt(m.price!)} ₽
                     </span>
                     <button onClick={() => applyOne(m)}
                       className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105"
                       style={{ background: "rgba(251,191,36,0.2)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.3)" }}>
-                      Применить
+                      ✓
                     </button>
                   </div>
                 </div>
