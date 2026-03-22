@@ -45,6 +45,12 @@
       "method": "GET",
       "path": "/?action=orders_list",
       "expectedStatus": 404
+    },
+    {
+      "name": "Supplier list no token",
+      "method": "GET",
+      "path": "/?action=supplier_list",
+      "expectedStatus": 403
     }
   ]
 }

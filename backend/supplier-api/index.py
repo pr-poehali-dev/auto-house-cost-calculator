@@ -185,6 +185,16 @@ def handler(event, context):
 
     # ══ SUPPLIER AUTH ══════════════════════════════════════════
 
+    # supplier_list — список всех поставщиков (только admin/director/assistant)
+    if action == "supplier_list":
+        st = get_staff(conn, staff_token)
+        if not st or st["role_code"] not in ("admin", "director", "assistant"):
+            conn.close(); return resp({"error": "Нет доступа"}, 403)
+        cur = conn.cursor()
+        cur.execute(f"SELECT id, company_name, contact_name, email, phone, is_verified, is_active, created_at FROM {S}.suppliers ORDER BY created_at DESC")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return resp({"suppliers": [{"id":r[0],"company_name":r[1],"contact_name":r[2],"email":r[3],"phone":r[4],"is_verified":r[5],"is_active":r[6],"created_at":str(r[7])} for r in rows]})
+
     # admin_reset_password (внутренний — только с staff токеном)
     if action == "admin_reset_password":
         st = get_staff(conn, staff_token)
