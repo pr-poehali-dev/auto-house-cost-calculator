@@ -1,8 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { API, apiFetch, formatMoney, type SupplierUser, type MatItem, type PriceRow, type PriceVersion, UNITS, CATS } from "./supplier-types";
+import PriceListArchive from "./PriceListArchive";
+import PriceListUpload from "./PriceListUpload";
+import PriceListTable from "./PriceListTable";
 
 const MAT_URL = "https://functions.poehali.dev/713860f8-f36f-4cbb-a1ba-0aadf96ecec9";
+
+// ─── SupplierPriceOffer ───────────────────────────────────────────────────────
 
 export function SupplierPriceOffer({ token, user }: { token: string; user: SupplierUser }) {
   const [items, setItems] = useState<MatItem[]>([]);
@@ -135,6 +140,8 @@ export function SupplierPriceOffer({ token, user }: { token: string; user: Suppl
   );
 }
 
+// ─── PriceListTab ─────────────────────────────────────────────────────────────
+
 export function PriceListTab({ token }: { token: string }) {
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [keyGen, setKeyGen] = useState(0);
@@ -151,7 +158,6 @@ export function PriceListTab({ token }: { token: string }) {
   const [archiveItems, setArchiveItems] = useState<PriceRow[]>([]);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [currentFileName, setCurrentFileName] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const addRow = () => {
     const k = keyGen + 1;
@@ -165,7 +171,6 @@ export function PriceListTab({ token }: { token: string }) {
     setRows(prev => prev.map(r => r._key === k ? { ...r, [field]: value } : r));
   };
 
-  // Загрузить сохранённый прайс
   useEffect(() => {
     apiFetch(API + "?action=price_list_get", {}, token).then(res => {
       if (res.items?.length) {
@@ -187,11 +192,9 @@ export function PriceListTab({ token }: { token: string }) {
 
   const formatDate = (d: string) => {
     if (!d) return "—";
-    const date = new Date(d);
-    return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+    return new Date(d).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
   };
 
-  // Поиск материала по названию
   const searchMaterial = async (k: number, q: string) => {
     setSearchQ(prev => ({ ...prev, [k]: q }));
     updateRow(k, "material_name", q);
@@ -206,7 +209,12 @@ export function PriceListTab({ token }: { token: string }) {
     setSearchQ(prev => ({ ...prev, [k]: "" }));
   };
 
-  // Загрузка Excel файла
+  const clearSearch = (k: number) => {
+    setSearchRes(prev => ({ ...prev, [k]: [] }));
+    updateRow(k, "material_name", searchQ[k] || "");
+    setSearchQ(prev => ({ ...prev, [k]: "" }));
+  };
+
   const handleFile = async (file: File) => {
     setUploading(true); setUploadMsg(""); setCurrentFileName(file.name);
     const reader = new FileReader();
@@ -239,7 +247,6 @@ export function PriceListTab({ token }: { token: string }) {
     reader.readAsDataURL(file);
   };
 
-  // AI-классификация вручную для текущих строк
   const classifyWithAI = async () => {
     const toClassify = rows.filter(r => r.material_name.trim());
     if (!toClassify.length) return;
@@ -253,12 +260,7 @@ export function PriceListTab({ token }: { token: string }) {
       setRows(prev => prev.map((row, idx) => {
         const updated = res.items[idx];
         if (!updated) return row;
-        return {
-          ...row,
-          category: updated.category || row.category,
-          unit: updated.unit || row.unit,
-          material_name: updated.name_clean || row.material_name,
-        };
+        return { ...row, category: updated.category || row.category, unit: updated.unit || row.unit, material_name: updated.name_clean || row.material_name };
       }));
       setMsg("✓ AI распознал категории для всех позиций");
     } else {
@@ -266,7 +268,6 @@ export function PriceListTab({ token }: { token: string }) {
     }
   };
 
-  // Сохранить прайс
   const savePriceList = async () => {
     const valid = rows.filter(r => r.material_name.trim() && parseFloat(String(r.price_per_unit)) > 0);
     if (!valid.length) { setMsg("Нет позиций с ценой"); return; }
@@ -285,15 +286,11 @@ export function PriceListTab({ token }: { token: string }) {
     setSaving(false);
     if (res.ok) {
       setMsg(`✓ Сохранено ${res.saved} позиций. Лучшие цены обновлены в базе.`);
-      // Обновить список версий
       apiFetch(API + "?action=price_list_get", {}, token).then(r => { if (r.versions) setVersions(r.versions); });
     } else {
       setMsg(res.error || "Ошибка сохранения");
     }
   };
-
-  const inp = "w-full px-2 py-1.5 rounded-lg text-xs text-white outline-none";
-  const inpSt = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" };
 
   const priceDate = rows.length > 0 ? rows.find(r => r.valid_from)?.valid_from : null;
 
@@ -327,177 +324,35 @@ export function PriceListTab({ token }: { token: string }) {
         )}
       </div>
 
-      {/* Архив версий */}
       {showArchive && versions.length > 0 && (
-        <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.08)" }}>
-          <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>История версий прайса</div>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {versions.map(v => (
-              <button key={v.id} onClick={() => loadArchiveVersion(v.id)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105"
-                style={{ background: archiveItems[0]?.valid_from === v.version_date ? "rgba(0,212,255,0.2)" : "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                <span>{formatDate(v.version_date)}</span>
-                <span className="ml-1.5 opacity-50">{v.items_count} поз.</span>
-                {v.file_name && <span className="ml-1.5 opacity-40">· {v.file_name.split("/").pop()}</span>}
-              </button>
-            ))}
-          </div>
-          {archiveLoading ? (
-            <div className="text-xs py-4 text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
-          ) : archiveItems.length > 0 && (
-            <div className="overflow-x-auto max-h-64 overflow-y-auto rounded-xl" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                    {["Наименование","Ед.","Цена, ₽","Категория"].map((h, i) => (
-                      <th key={i} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.3)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {archiveItems.map((r, i) => (
-                    <tr key={i} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                      <td className="px-3 py-1.5 text-white">{r.material_name}</td>
-                      <td className="px-3 py-1.5" style={{ color: "rgba(255,255,255,0.5)" }}>{r.unit}</td>
-                      <td className="px-3 py-1.5 font-mono" style={{ color: "var(--neon-cyan)" }}>{Number(r.price_per_unit).toLocaleString("ru-RU")}</td>
-                      <td className="px-3 py-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>{r.category}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <PriceListArchive
+          versions={versions}
+          archiveItems={archiveItems}
+          archiveLoading={archiveLoading}
+          onLoadVersion={loadArchiveVersion}
+        />
       )}
 
-      {/* Загрузка файла */}
-      <div className="rounded-2xl p-5 mb-5" style={{ background: "var(--card-bg)", border: "1px solid rgba(0,212,255,0.2)" }}>
-        <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Загрузить из файла</div>
-        <div className="flex flex-wrap items-center gap-3">
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden"
-            onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
-            style={{ background: "rgba(0,212,255,0.15)", color: "var(--neon-cyan)", border: "1px solid rgba(0,212,255,0.3)" }}>
-            <Icon name={uploading ? "Loader" : "Upload"} size={15} />
-            {uploading ? "Обработка файла..." : "Загрузить Excel / PDF"}
-          </button>
-          <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-            Формат: колонки «Наименование», «Ед.», «Кол-во», «Цена»
-          </div>
-        </div>
-        {uploadMsg && (
-          <div className="mt-3 text-sm px-3 py-2 rounded-lg"
-            style={{ background: uploadMsg.startsWith("✓") ? "rgba(0,255,136,0.08)" : "rgba(251,191,36,0.08)", color: uploadMsg.startsWith("✓") ? "var(--neon-green)" : "#FBBF24" }}>
-            {uploadMsg}
-          </div>
-        )}
-      </div>
+      <PriceListUpload
+        uploading={uploading}
+        uploadMsg={uploadMsg}
+        onFile={handleFile}
+      />
 
-      {/* Таблица позиций */}
-      <div className="rounded-2xl overflow-hidden mb-4" style={{ border: "1px solid var(--card-border)" }}>
-        <div className="px-4 py-3 flex items-center justify-between" style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.35)" }}>
-            Позиции прайс-листа ({rows.length})
-          </span>
-          <div className="flex items-center gap-2">
-            {rows.some(r => r.material_name.trim()) && (
-              <button onClick={classifyWithAI} disabled={classifying}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105 disabled:opacity-60"
-                style={{ background: "rgba(139,92,246,0.15)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.3)" }}>
-                <Icon name={classifying ? "Loader" : "Sparkles"} size={13} />
-                {classifying ? "AI думает..." : "Распознать AI"}
-              </button>
-            )}
-            <button onClick={addRow}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-105"
-              style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
-              <Icon name="Plus" size={13} /> Добавить строку
-            </button>
-          </div>
-        </div>
-
-        {loadingExisting ? (
-          <div className="text-center py-10 text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузка...</div>
-        ) : rows.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-4xl mb-2">📋</div>
-            <div className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Загрузите файл или добавьте позиции вручную</div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "rgba(255,255,255,0.02)" }}>
-                  {["Наименование","Ед.","Цена, ₽","Категория","Артикул","Примечание",""].map((h, i) => (
-                    <th key={i} className="px-3 py-2.5 text-left font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={row._key} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: idx % 2 ? "rgba(255,255,255,0.012)" : "transparent" }}>
-                    {/* Наименование с поиском */}
-                    <td className="px-3 py-2 min-w-48 relative">
-                      <input className={inp} style={{ ...inpSt, ...(row.material_id ? { borderColor: "rgba(0,255,136,0.3)" } : {}) }}
-                        placeholder="Название материала"
-                        value={searchQ[row._key] !== undefined ? searchQ[row._key] : row.material_name}
-                        onChange={e => searchMaterial(row._key, e.target.value)} />
-                      {row.material_id && (
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--neon-green)" }}>✓</span>
-                      )}
-                      {(searchRes[row._key]?.length || 0) > 0 && (
-                        <div className="absolute z-20 left-3 top-full mt-1 rounded-xl overflow-hidden shadow-xl" style={{ background: "#1a1f2e", border: "1px solid rgba(0,212,255,0.2)", minWidth: 240 }}>
-                          {searchRes[row._key].map(m => (
-                            <button key={m.id} type="button" onClick={() => pickMaterial(row._key, m)}
-                              className="w-full text-left px-3 py-2 text-xs hover:bg-white/10 transition-colors">
-                              <span className="text-white font-medium">{m.name}</span>
-                              <span className="ml-2 opacity-50">{m.unit} · {m.category}</span>
-                            </button>
-                          ))}
-                          <button type="button" onClick={() => { setSearchRes(prev => ({ ...prev, [row._key]: [] })); updateRow(row._key, "material_name", searchQ[row._key] || ""); setSearchQ(prev => ({ ...prev, [row._key]: "" })); }}
-                            className="w-full text-left px-3 py-2 text-xs border-t transition-colors hover:bg-white/10"
-                            style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--neon-orange)" }}>
-                            + Добавить как новый материал
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 w-20">
-                      <select className={inp} style={inpSt} value={row.unit} onChange={e => updateRow(row._key, "unit", e.target.value)}>
-                        {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2 w-28">
-                      <input type="number" className={inp} style={{ ...inpSt, ...(parseFloat(String(row.price_per_unit)) > 0 ? { borderColor: "rgba(0,212,255,0.3)" } : {}) }}
-                        placeholder="0" value={row.price_per_unit}
-                        onChange={e => updateRow(row._key, "price_per_unit", e.target.value)} />
-                    </td>
-                    <td className="px-3 py-2 w-36">
-                      <select className={inp} style={inpSt} value={row.category} onChange={e => updateRow(row._key, "category", e.target.value)}>
-                        {CATS.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2 w-24">
-                      <input className={inp} style={inpSt} placeholder="—" value={row.article}
-                        onChange={e => updateRow(row._key, "article", e.target.value)} />
-                    </td>
-                    <td className="px-3 py-2 w-36">
-                      <input className={inp} style={inpSt} placeholder="Примечание" value={row.note}
-                        onChange={e => updateRow(row._key, "note", e.target.value)} />
-                    </td>
-                    <td className="px-2 py-2">
-                      <button onClick={() => removeRow(row._key)} className="p-1 rounded-lg transition-all hover:bg-red-500/20" style={{ color: "rgba(255,255,255,0.2)" }}>
-                        <Icon name="X" size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <PriceListTable
+        rows={rows}
+        loadingExisting={loadingExisting}
+        classifying={classifying}
+        searchQ={searchQ}
+        searchRes={searchRes}
+        onAddRow={addRow}
+        onRemoveRow={removeRow}
+        onUpdateRow={updateRow}
+        onSearchMaterial={searchMaterial}
+        onPickMaterial={pickMaterial}
+        onClearSearch={clearSearch}
+        onClassifyWithAI={classifyWithAI}
+      />
 
       {msg && (
         <div className="mb-4 px-4 py-3 rounded-xl text-sm"
