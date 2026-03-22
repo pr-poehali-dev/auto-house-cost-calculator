@@ -140,6 +140,7 @@ function ResultPanel({
   animKey, totalCost, area, floors, houseTypeLabel, finishingLabel,
   baseConstruction, roofCost, foundationCost, finishingCost, commsCost, additionalCost,
 }: ResultPanelProps) {
+  const [showLeadModal, setShowLeadModal] = useState(false);
   const breakdown = [
     { label: "Строительство", val: baseConstruction, color: "var(--neon-orange)" },
     { label: "Кровля", val: roofCost, color: "#A855F7" },
@@ -226,7 +227,7 @@ function ResultPanel({
       {showLeadModal && (
         <LeadModal
           onClose={() => setShowLeadModal(false)}
-          calcData={{ area, floors, houseType: houseTypeData.label, totalCost }}
+          calcData={{ area, floors, houseType: houseTypeLabel, totalCost }}
         />
       )}
     </div>
@@ -266,7 +267,6 @@ export default function CalcTab({
 }: CalcTabProps) {
   const houseTypeData = HOUSE_TYPES.find(h => h.id === houseType)!;
   const finishingData = FINISHING.find(f => f.id === finishing)!;
-  const [showLeadModal, setShowLeadModal] = useState(false);;
 
   return (
     <div className="animate-fade-in">
