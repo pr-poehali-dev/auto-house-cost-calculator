@@ -142,7 +142,7 @@ def handler(event: dict, context) -> dict:
         return json_resp({"token": new_token, "staff": {"id": staff_id, "login": login, "full_name": full_name, "role_code": role_code}})
 
     # GET /me — проверить токен
-    if method == "GET" or (method == "GET" and action == "me") or path.endswith("/me"):
+    if (method == "GET" and action in ("me", "")) or path.endswith("/me"):
         if not token:
             conn.close()
             return json_resp({"error": "Не авторизован"}, 401)
