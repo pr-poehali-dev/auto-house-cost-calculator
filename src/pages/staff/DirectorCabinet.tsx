@@ -45,7 +45,7 @@ export default function DirectorCabinet({
   const load = useCallback(async () => {
     setLoading(true);
     const res = await authFetch(`${AUTH_URL}?action=staff_list`, {}, token);
-    setStaffList(res.staff || []);
+    setStaffList(Array.isArray(res.staff) ? res.staff : []);
     setLoading(false);
   }, [token]);
 
