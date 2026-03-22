@@ -1,0 +1,6 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "Без токена — 401", "method": "GET", "path": "/", "expectedStatus": 401, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"}
+  ]
+}

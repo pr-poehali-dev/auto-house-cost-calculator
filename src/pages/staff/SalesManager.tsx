@@ -1506,6 +1506,7 @@ function HistoryTab({ order, token, onRefresh }: { order: Order; token: string; 
 
 // ─── CRM URL ──────────────────────────────────────────────────────────────────
 const CRM_URL = "https://functions.poehali.dev/ca6be6cc-ad08-4970-a85b-363894cb1a6f";
+const AVITO_SYNC_URL = "https://functions.poehali.dev/511c97fe-5f02-4410-b267-767e247c4c5f";
 
 // ─── CRM Types ────────────────────────────────────────────────────────────────
 interface Lead {
@@ -1934,6 +1935,8 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
   const [stageFilter, setStageFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [stats, setStats] = useState<Record<string,number>>({});
+  const [avitoSyncing, setAvitoSyncing] = useState(false);
+  const [avitoMsg, setAvitoMsg] = useState("");
 
   // Новый лид
   const [newForm, setNewForm] = useState({ name: "", phone: "", email: "", source_id: "", stage: "new" });
@@ -1953,6 +1956,24 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+
+  const syncAvito = async () => {
+    setAvitoSyncing(true);
+    setAvitoMsg("");
+    try {
+      const r = await apiFetch(`${AVITO_SYNC_URL}`, {}, token);
+      if (r.ok) {
+        setAvitoMsg(r.created > 0 ? `✅ Авито: ${r.created} новых лидов` : "Авито: новых обращений нет");
+        if (r.created > 0) load();
+      } else {
+        setAvitoMsg(`⚠️ ${r.error || "Ошибка синхронизации"}`);
+      }
+    } catch {
+      setAvitoMsg("⚠️ Ошибка подключения к Авито");
+    }
+    setAvitoSyncing(false);
+    setTimeout(() => setAvitoMsg(""), 5000);
+  };
 
   const createLead = async () => {
     if (!newForm.name.trim()) return;
@@ -1995,6 +2016,12 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
               <Icon name="List" size={13} />
             </button>
           </div>
+          <button onClick={syncAvito} disabled={avitoSyncing}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+            style={{ background: "rgba(0,255,136,0.12)", color: "var(--neon-green)", border: "1px solid rgba(0,255,136,0.25)" }}>
+            <Icon name={avitoSyncing ? "Loader" : "RefreshCw"} size={13} className={avitoSyncing ? "animate-spin" : ""} />
+            {avitoSyncing ? "Авито..." : "Авито"}
+          </button>
           <button onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
             style={{ background: "var(--neon-orange)", color: "#fff" }}>
@@ -2002,6 +2029,12 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
           </button>
         </div>
       </div>
+      {avitoMsg && (
+        <div className="px-4 py-2.5 rounded-xl text-sm"
+          style={{ background: avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.08)" : "rgba(251,191,36,0.08)", color: avitoMsg.startsWith("✅") ? "var(--neon-green)" : "#FBBF24", border: `1px solid ${avitoMsg.startsWith("✅") ? "rgba(0,255,136,0.2)" : "rgba(251,191,36,0.2)"}` }}>
+          {avitoMsg}
+        </div>
+      )}
 
       {/* Поиск */}
       <div className="relative">
