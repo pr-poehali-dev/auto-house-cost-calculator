@@ -5,13 +5,19 @@
       "method": "GET",
       "path": "/?action=public_list",
       "expectedStatus": 200,
-      "expectedBody": {"projects": [{"id": 1}]},
+      "expectedBody": {"projects": [{"id": 12}]},
       "bodyMatcher": "partial"
     },
     {
       "name": "Get projects without token",
       "method": "GET",
       "path": "/?action=list",
+      "expectedStatus": 401
+    },
+    {
+      "name": "calc_load without token",
+      "method": "GET",
+      "path": "/?action=calc_load&project_id=1",
       "expectedStatus": 401
     }
   ]

@@ -861,5 +861,36 @@ def handler(event: dict, context) -> dict:
         conn.commit(); cur.close(); conn.close()
         return resp({"ok": True})
 
+    # ── Расчёт по элементам (ВОР) — сохранить ─────────────────────────────────
+    if action == "calc_save":
+        pid = body.get("project_id")
+        elements = body.get("elements", [])
+        if not pid: conn.close(); return resp({"error": "project_id обязателен"}, 400)
+        elements_str = json.dumps(elements, ensure_ascii=False)
+        cur = conn.cursor()
+        cur.execute(
+            f"""INSERT INTO {S}.project_calc_elements (project_id, elements_json, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (project_id) DO UPDATE
+                SET elements_json = EXCLUDED.elements_json, updated_at = NOW()""",
+            (pid, elements_str)
+        )
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    # ── Расчёт по элементам (ВОР) — загрузить ─────────────────────────────────
+    if action == "calc_load":
+        pid = body.get("project_id") or qs.get("project_id")
+        if not pid: conn.close(); return resp({"error": "project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT elements_json, updated_at FROM {S}.project_calc_elements WHERE project_id=%s",
+            (pid,)
+        )
+        row = cur.fetchone(); cur.close(); conn.close()
+        if not row:
+            return resp({"elements": [], "updated_at": None})
+        return resp({"elements": json.loads(row[0]), "updated_at": str(row[1])})
+
     conn.close()
     return resp({"error":"Not found"}, 404)

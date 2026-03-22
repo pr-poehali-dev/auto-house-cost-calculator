@@ -1249,12 +1249,42 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const [objectInfo, setObjectInfo] = useState<ObjectInfo>(EMPTY_INFO);
   const [infoSaving, setInfoSaving] = useState(false);
   const [placedElements, setPlacedElements] = useState<PlacedElement[]>([]);
+  const [calcSaving, setCalcSaving] = useState(false);
+  const [calcSavedAt, setCalcSavedAt] = useState<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadProject = useCallback(async () => {
     const r = await apiFetch(`${PROJECTS_URL}?action=get&project_id=${project.id}`, {}, token);
     if (r.project) setProj(r.project);
   }, [project.id, token]);
+
+  // Загружаем сохранённые элементы расчёта при открытии проекта
+  useEffect(() => {
+    apiFetch(`${PROJECTS_URL}?action=calc_load&project_id=${project.id}`, {}, token).then(r => {
+      if (r.elements?.length) {
+        setPlacedElements(r.elements);
+        setCalcSavedAt(r.updated_at);
+      }
+    });
+  }, [project.id, token]);
+
+  // Автосохранение с дебаунсом 2 сек при изменении элементов
+  const saveCalc = useCallback(async (elements: PlacedElement[]) => {
+    setCalcSaving(true);
+    const r = await apiFetch(`${PROJECTS_URL}?action=calc_save`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, elements }),
+    }, token);
+    setCalcSaving(false);
+    if (r.ok) setCalcSavedAt(new Date().toISOString());
+  }, [project.id, token]);
+
+  const handlePlacedChange = (els: PlacedElement[]) => {
+    setPlacedElements(els);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => saveCalc(els), 2000);
+  };
 
   useEffect(() => { if (tab === "files") loadProject(); }, [tab, loadProject]);
 
@@ -1368,11 +1398,23 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
 
       {/* ── 2. Расчёт по элементам ── */}
       {tab === "calc" && (
-        <ElementsCalcTab
-          info={objectInfo}
-          placed={placedElements}
-          onPlacedChange={setPlacedElements}
-        />
+        <div>
+          {/* Статус сохранения */}
+          <div className="flex items-center gap-2 mb-4 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+            {calcSaving ? (
+              <><Icon name="Loader" size={12} className="animate-spin" /> Сохраняю...</>
+            ) : calcSavedAt ? (
+              <><Icon name="CheckCircle" size={12} style={{ color: "#00FF88" }} />
+              <span style={{ color: "#00FF88" }}>Сохранено</span>
+              <span>· {new Date(calcSavedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span></>
+            ) : null}
+          </div>
+          <ElementsCalcTab
+            info={objectInfo}
+            placed={placedElements}
+            onPlacedChange={handlePlacedChange}
+          />
+        </div>
       )}
 
       {/* ── Графика ── */}
