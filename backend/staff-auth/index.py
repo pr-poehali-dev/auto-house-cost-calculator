@@ -224,6 +224,33 @@ def handler(event: dict, context) -> dict:
             "impersonated_by": {"id": me["id"], "full_name": me["full_name"], "token": token}
         })
 
+    # POST reset_password — сброс пароля любого сотрудника (только admin/director)
+    if method == "POST" and action == "reset_password":
+        if not token:
+            conn.close()
+            return json_resp({"error": "Не авторизован"}, 401)
+        me = get_staff_by_token(conn, token)
+        if not me:
+            conn.close()
+            return json_resp({"error": "Сессия истекла"}, 401)
+        if me["role_code"] not in ("admin", "director", "assistant"):
+            conn.close()
+            return json_resp({"error": "Доступ запрещён"}, 403)
+        staff_id = body.get("staff_id")
+        new_pw = body.get("new_password", "")
+        if not staff_id:
+            conn.close()
+            return json_resp({"error": "staff_id обязателен"}, 400)
+        if len(new_pw) < 6:
+            conn.close()
+            return json_resp({"error": "Пароль должен быть не менее 6 символов"}, 400)
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {SCHEMA}.staff SET password_hash = %s WHERE id = %s", (hash_password(new_pw), staff_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return json_resp({"ok": True})
+
     # POST /change_password
     if method == "POST" and (action == "change_password" or path.endswith("/change_password")):
         if not token:

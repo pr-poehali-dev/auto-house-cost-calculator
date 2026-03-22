@@ -11,6 +11,7 @@ import DashboardShell from "./staff/DashboardShell";
 import SupplyCabinet from "./staff/SupplyCabinet";
 import MarketerCabinet from "./staff/MarketerCabinet";
 import DirectorCabinet from "./staff/DirectorCabinet";
+import AdminCabinet from "./staff/AdminCabinet";
 import { AUTH_URL, MATERIALS_URL, PROJECTS_URL, TOKEN_KEY, StaffUser, Material, HouseProject, ROLE_COLORS, authFetch } from "./staff/staff-types";
 
 // ─── Architect cabinet (legacy inline) ────────────────────────────────────────
@@ -587,6 +588,7 @@ export default function Staff() {
       case "supply": return <SupplyCabinet user={user} token={token} />;
       case "manager": return <SalesManager user={user} token={token} />;
       case "marketer": return <MarketerCabinet user={user} token={token} />;
+      case "admin": return <AdminCabinet user={user} token={token} />;
       case "director":
       case "assistant":
         return <DirectorCabinet user={user} token={token} onImpersonate={handleImpersonate} />;

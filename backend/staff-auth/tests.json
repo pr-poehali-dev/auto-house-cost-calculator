@@ -32,6 +32,13 @@
       "path": "/?action=impersonate",
       "body": {"staff_id": 1},
       "expectedStatus": 401
+    },
+    {
+      "name": "Reset password without token",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "reset_password", "staff_id": 1, "new_password": "newpass123"},
+      "expectedStatus": 401
     }
   ]
 }
