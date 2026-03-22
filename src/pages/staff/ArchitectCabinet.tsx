@@ -1480,51 +1480,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
             )}
             {uploadMsg && <div className="mt-2 text-sm" style={{ color: uploadMsg.includes("!") ? "var(--neon-green)" : "#ef4444" }}>{uploadMsg}</div>}
 
-            {/* AI-разбор файла */}
-            {(aiParseLoading || aiParseMsg) && (
-              <div className="mt-4 rounded-xl p-4" style={{ background: "rgba(0,255,136,0.06)", border: "1px solid rgba(0,255,136,0.2)" }}>
-                {aiParseLoading ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/10 rounded-full animate-spin flex-shrink-0" style={{ borderTopColor: "var(--neon-green)" }} />
-                    <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>{aiParseMsg}</span>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div className="flex items-center gap-2">
-                        <Icon name={aiParsedItems.length > 0 ? "CheckCircle" : "AlertCircle"} size={15}
-                          style={{ color: aiParsedItems.length > 0 ? "var(--neon-green)" : "#FBBF24", flexShrink: 0 }} />
-                        <span className="text-sm font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>{aiParseMsg}</span>
-                      </div>
-                      {aiParsedItems.length > 0 && (
-                        <button onClick={addParsedItemsToSpec} disabled={addingToSpec}
-                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-60 flex-shrink-0"
-                          style={{ background: "var(--neon-green)", color: "#0a0d14" }}>
-                          <Icon name={addingToSpec ? "Loader2" : "PlusCircle"} size={13} className={addingToSpec ? "animate-spin" : ""} />
-                          {addingToSpec ? "Добавляю..." : "Добавить в ведомость"}
-                        </button>
-                      )}
-                    </div>
-                    {aiParsedItems.length > 0 && (
-                      <div className="max-h-48 overflow-y-auto space-y-1">
-                        {aiParsedItems.slice(0, 10).map((it, i) => (
-                          <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs"
-                            style={{ background: "rgba(255,255,255,0.04)" }}>
-                            <span style={{ color: "rgba(255,255,255,0.7)" }}>{it.section} · {it.name}</span>
-                            <span style={{ color: "rgba(255,255,255,0.35)" }}>{it.qty} {it.unit}</span>
-                          </div>
-                        ))}
-                        {aiParsedItems.length > 10 && (
-                          <div className="text-xs text-center py-1" style={{ color: "rgba(255,255,255,0.25)" }}>
-                            и ещё {aiParsedItems.length - 10} позиций...
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+
           </div>
 
           {/* Файлы по разделам */}
