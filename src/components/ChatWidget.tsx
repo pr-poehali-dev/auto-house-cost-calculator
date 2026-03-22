@@ -78,7 +78,7 @@ function TypingDots() {
 }
 
 export default function ChatWidget({ role = "visitor", userName }: ChatWidgetProps) {
-  const config = ROLE_CONFIG[role];
+  const config = ROLE_CONFIG[role] ?? ROLE_CONFIG["visitor"];
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: config.greeting, ts: Date.now() },
