@@ -1,4 +1,4 @@
-import { useState, useEffect, useId } from "react";
+import { useState, useId } from "react";
 import Icon from "@/components/ui/icon";
 import type { ObjectInfo } from "./ObjectInfoTab";
 
@@ -21,7 +21,8 @@ type ElementKind =
   | "strip_foundation" | "slab_foundation"
   | "wall_layer" | "jb_belt"
   | "floor_slab_deck" | "floor_slab_hollow" | "floor_slab_mono" | "floor_slab_wood"
-  | "window" | "door";
+  | "window" | "door"
+  | "roof_pitched" | "roof_flat" | "roof_mansard";
 
 interface PlacedElement {
   id: string;
@@ -60,14 +61,19 @@ const LIBRARY: LibItem[] = [
   // Проёмы
   { kind: "window",          group: "Проёмы",    label: "Оконный блок",        icon: "AppWindow",    color: "#10b981", description: "Окно с перемычкой" },
   { kind: "door",            group: "Проёмы",    label: "Дверной блок",        icon: "DoorOpen",     color: "#10b981", description: "Дверь с перемычкой" },
+  // Кровля
+  { kind: "roof_pitched",    group: "Кровля",    label: "Кровля скатная",      icon: "Home",         color: "#ef4444", description: "Двускатная / вальмовая кровля" },
+  { kind: "roof_flat",       group: "Кровля",    label: "Кровля плоская",      icon: "Minus",        color: "#ef4444", description: "Плоская эксплуатируемая / неэксплуатируемая" },
+  { kind: "roof_mansard",    group: "Кровля",    label: "Кровля мансардная",   icon: "TrendingUp",   color: "#ef4444", description: "Ломаная мансардная кровля" },
 ];
 
-const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы"];
+const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы", "Кровля"];
 const GROUP_COLORS: Record<string, string> = {
   "Фундамент":  "#3b82f6",
   "Стены":      "#f59e0b",
   "Перекрытия": "#a855f7",
   "Проёмы":     "#10b981",
+  "Кровля":     "#ef4444",
 };
 
 // ─── Дефолтные параметры по виду ─────────────────────────────────────────────
@@ -105,6 +111,12 @@ function defaultParams(kind: ElementKind, info: ObjectInfo): Record<string, numb
       return { width: 1.2, height: 1.4, material: "ПВХ", profile_thickness: 70, chambers: 2, leaves: 2, opening: "Откидное", count: 1, floor: 1 };
     case "door":
       return { width: 0.9, height: 2.1, type: "Входная", material: "Металл", count: 1, floor: 1 };
+    case "roof_pitched":
+      return { roof_area: area ? area * 1.25 : 0, slope_angle: 35, roofing_material: "Металлочерепица", insulation_thickness: 0.15, rafter_section_w: 0.05, rafter_section_h: 0.2, rafter_step: 0.6, ridge_len: 0, eaves_len: 0 };
+    case "roof_flat":
+      return { roof_area: area || 0, roofing_material: "Мембрана ПВХ", insulation_thickness: 0.2, screed_thickness: 0.05, slope_layer: "Керамзит" };
+    case "roof_mansard":
+      return { roof_area: area ? area * 1.4 : 0, roofing_material: "Металлочерепица", insulation_thickness: 0.2, rafter_section_w: 0.05, rafter_section_h: 0.2, rafter_step: 0.6 };
     default:
       return {};
   }
@@ -348,6 +360,64 @@ function calcVor(kind: ElementKind, p: Record<string, number | string | boolean>
       ];
     }
 
+    case "roof_pitched": {
+      const area = n("roof_area");
+      const rafterW = n("rafter_section_w");
+      const rafterH = n("rafter_section_h");
+      const rafterStep = n("rafter_step") || 0.6;
+      const insul = n("insulation_thickness");
+      const rafterCount = area > 0 ? Math.ceil(Math.sqrt(area) / rafterStep) * 2 : 0;
+      const rafterLen = Math.sqrt(area / 2) / Math.cos((n("slope_angle") * Math.PI) / 180);
+      const rafterVol = rafterW * rafterH * rafterLen * rafterCount;
+      return [
+        { id: id(), section: "Кровля", name: `Кровельное покрытие ${p["roofing_material"]}`, unit: "м²", qty: +(area * 1.05).toFixed(2), note: "с учётом нахлёста", is_work: false },
+        { id: id(), section: "Кровля", name: `Утеплитель кровли δ=${insul * 1000}мм`, unit: "м²", qty: +area.toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Гидро-ветрозащитная плёнка", unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Пароизоляционная плёнка", unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Стропила ${rafterW * 1000}×${rafterH * 1000}мм`, unit: "м³", qty: +rafterVol.toFixed(3), note: `${rafterCount} шт`, is_work: false },
+        { id: id(), section: "Кровля", name: "Обрешётка (доска 25×100мм)", unit: "м²", qty: +area.toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Монтаж кровельного покрытия ${p["roofing_material"]}`, unit: "м²", qty: +area.toFixed(2), is_work: true },
+        { id: id(), section: "Кровля", name: "Устройство стропильной системы", unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "roof_flat": {
+      const area = n("roof_area");
+      const insul = n("insulation_thickness");
+      const screed = n("screed_thickness");
+      const screedVol = area * screed;
+      return [
+        { id: id(), section: "Кровля", name: `Кровельная мембрана (${p["roofing_material"]})`, unit: "м²", qty: +(area * 1.1).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Утеплитель плоской кровли δ=${insul * 1000}мм`, unit: "м²", qty: +area.toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Уклонообразующий слой (${p["slope_layer"]})`, unit: "м³", qty: +(area * 0.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Цементно-песчаная стяжка кровли", unit: "м³", qty: +screedVol.toFixed(3), is_work: false },
+        { id: id(), section: "Кровля", name: "Пароизоляционная плёнка", unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Устройство плоской кровли (мембрана)", unit: "м²", qty: +area.toFixed(2), is_work: true },
+        { id: id(), section: "Кровля", name: "Устройство теплоизоляции кровли", unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "roof_mansard": {
+      const area = n("roof_area");
+      const rafterW = n("rafter_section_w");
+      const rafterH = n("rafter_section_h");
+      const rafterStep = n("rafter_step") || 0.6;
+      const insul = n("insulation_thickness");
+      const rafterCount = area > 0 ? Math.ceil(Math.sqrt(area) / rafterStep) * 2 : 0;
+      const rafterLen = Math.sqrt(area / 2);
+      const rafterVol = rafterW * rafterH * rafterLen * rafterCount;
+      return [
+        { id: id(), section: "Кровля", name: `Кровельное покрытие ${p["roofing_material"]} (мансарда)`, unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Утеплитель мансарды δ=${insul * 1000}мм`, unit: "м²", qty: +area.toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Гидро-ветрозащитная плёнка", unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Пароизоляционная плёнка", unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: `Стропила мансарды ${rafterW * 1000}×${rafterH * 1000}мм`, unit: "м³", qty: +rafterVol.toFixed(3), note: `${rafterCount} шт`, is_work: false },
+        { id: id(), section: "Кровля", name: "Обрешётка мансардная", unit: "м²", qty: +area.toFixed(2), is_work: false },
+        { id: id(), section: "Кровля", name: "Монтаж стропильной системы мансарды", unit: "м²", qty: +area.toFixed(2), is_work: true },
+        { id: id(), section: "Кровля", name: `Монтаж кровли ${p["roofing_material"]}`, unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
     default:
       return [];
   }
@@ -587,6 +657,38 @@ function ElementParamsForm({ el, onUpdate }: {
         {numField("Этаж", "floor", "эт", p, upd)}
       </div>;
 
+    case "roof_pitched":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь кровли", "roof_area", "м²", p, upd)}
+        {numField("Угол наклона", "slope_angle", "°", p, upd)}
+        {selField("Кровельный материал", "roofing_material", ["Металлочерепица","Профнастил","Гибкая черепица","Керамическая черепица","Сланец","Фальцевая кровля"])}
+        {numField("Толщина утеплителя", "insulation_thickness", "м", p, upd)}
+        {numField("Сечение стропил (ш)", "rafter_section_w", "м", p, upd)}
+        {numField("Сечение стропил (в)", "rafter_section_h", "м", p, upd)}
+        {numField("Шаг стропил", "rafter_step", "м", p, upd)}
+        {numField("Длина конька", "ridge_len", "м", p, upd)}
+        {numField("Длина карниза", "eaves_len", "м", p, upd)}
+      </div>;
+
+    case "roof_flat":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь кровли", "roof_area", "м²", p, upd)}
+        {selField("Кровельный материал", "roofing_material", ["Мембрана ПВХ","Мембрана ЭПДМ","Мембрана ТПО","Рулонная (еврорубероид)","Напыляемая гидроизоляция"])}
+        {numField("Толщина утеплителя", "insulation_thickness", "м", p, upd)}
+        {numField("Толщина стяжки", "screed_thickness", "м", p, upd)}
+        {selField("Уклонообразующий слой", "slope_layer", ["Керамзит","Перлит","Клиновидный утеплитель","Бетонная стяжка"])}
+      </div>;
+
+    case "roof_mansard":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь кровли", "roof_area", "м²", p, upd)}
+        {selField("Кровельный материал", "roofing_material", ["Металлочерепица","Профнастил","Гибкая черепица","Керамическая черепица","Фальцевая кровля"])}
+        {numField("Толщина утеплителя", "insulation_thickness", "м", p, upd)}
+        {numField("Сечение стропил (ш)", "rafter_section_w", "м", p, upd)}
+        {numField("Сечение стропил (в)", "rafter_section_h", "м", p, upd)}
+        {numField("Шаг стропил", "rafter_step", "м", p, upd)}
+      </div>;
+
     default:
       return null;
   }
@@ -645,45 +747,67 @@ function VorTable({ rows }: { rows: VorRow[] }) {
 // ─── Карточка размещённого элемента ──────────────────────────────────────────
 
 function PlacedCard({
-  el, libItem, onUpdate, onRemove,
+  el, libItem, onUpdate, onRemove, onRename,
 }: {
   el: PlacedElement;
   libItem: LibItem;
   onUpdate: (params: Record<string, number | string | boolean>) => void;
   onRemove: () => void;
+  onRename: (label: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"params" | "vor">("params");
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelBuf, setLabelBuf] = useState(el.label);
   const vor = calcVor(el.kind, el.params);
   const hasData = vor.length > 0 && vor.some(r => r.qty > 0);
 
   return (
     <div className="rounded-2xl overflow-hidden mb-3" style={{ border: `1px solid ${libItem.color}33`, background: "rgba(255,255,255,0.02)" }}>
       {/* Шапка */}
-      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setOpen(v => !v)}
-        style={{ background: `${libItem.color}0d` }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+      <div className="flex items-center gap-3 px-4 py-3" style={{ background: `${libItem.color}0d` }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-pointer" onClick={() => setOpen(v => !v)}
           style={{ background: `${libItem.color}20` }}>
           <Icon name={libItem.icon} size={15} style={{ color: libItem.color }} />
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-white">{el.label}</div>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setOpen(v => !v)}>
+          {editingLabel ? (
+            <input
+              autoFocus
+              value={labelBuf}
+              onChange={e => setLabelBuf(e.target.value)}
+              onBlur={() => { onRename(labelBuf.trim() || el.label); setEditingLabel(false); }}
+              onKeyDown={e => { if (e.key === "Enter") { onRename(labelBuf.trim() || el.label); setEditingLabel(false); } if (e.key === "Escape") { setLabelBuf(el.label); setEditingLabel(false); } }}
+              onClick={e => e.stopPropagation()}
+              className="text-sm font-semibold text-white bg-transparent outline-none border-b w-full"
+              style={{ borderColor: libItem.color }}
+            />
+          ) : (
+            <div className="text-sm font-semibold text-white">{el.label}</div>
+          )}
           {hasData && (
             <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
               {vor.filter(r => !r.is_work).length} материалов · {vor.filter(r => r.is_work).length} работ
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {hasData && (
-            <div className="w-2 h-2 rounded-full" style={{ background: "#00FF88" }} title="Расчёт готов" />
+            <div className="w-2 h-2 rounded-full mr-1" style={{ background: "#00FF88" }} title="Расчёт готов" />
           )}
+          <button onClick={e => { e.stopPropagation(); setLabelBuf(el.label); setEditingLabel(true); }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+            style={{ color: "rgba(255,255,255,0.3)" }} title="Переименовать">
+            <Icon name="Pencil" size={12} />
+          </button>
           <button onClick={e => { e.stopPropagation(); onRemove(); }}
             className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-500/20 transition-colors"
             style={{ color: "rgba(255,255,255,0.3)" }}>
             <Icon name="Trash2" size={13} />
           </button>
-          <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
+          <button onClick={() => setOpen(v => !v)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10">
+            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
+          </button>
         </div>
       </div>
 
@@ -747,6 +871,10 @@ export default function ElementsCalcTab({
 
   const removeEl = (id: string) => {
     onPlacedChange(placed.filter(e => e.id !== id));
+  };
+
+  const renameEl = (id: string, label: string) => {
+    onPlacedChange(placed.map(e => e.id === id ? { ...e, label } : e));
   };
 
   // Сводная ВОР по всем элементам
@@ -832,7 +960,8 @@ export default function ElementsCalcTab({
                       return (
                         <PlacedCard key={el.id} el={el} libItem={lib}
                           onUpdate={p => updateEl(el.id, p)}
-                          onRemove={() => removeEl(el.id)} />
+                          onRemove={() => removeEl(el.id)}
+                          onRename={label => renameEl(el.id, label)} />
                       );
                     })}
                   </div>
