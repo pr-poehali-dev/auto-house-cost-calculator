@@ -1263,6 +1263,14 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Лайтбокс для просмотра изображений
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightbox(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Блокировка и согласование
   const [lockStatus, setLockStatus] = useState({ locked: project.locked_by != null, lockedByMe: !!project.locked_by_me, lockedByName: project.locked_by_name || "" });
   const [calcStatus, setCalcStatus] = useState(project.calc_status || "draft");
@@ -1788,7 +1796,13 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
                   <div key={file.id} className="rounded-xl overflow-hidden group relative"
                     style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
                     {file.file_url.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ? (
-                      <img src={file.file_url} alt={file.file_name} className="w-full h-32 object-cover" />
+                      <div className="relative cursor-zoom-in" onClick={() => setLightbox({ url: file.file_url, name: file.file_name })}>
+                        <img src={file.file_url} alt={file.file_name} className="w-full h-32 object-cover" />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          style={{ background: "rgba(0,0,0,0.4)" }}>
+                          <Icon name="ZoomIn" size={24} style={{ color: "#fff" }} />
+                        </div>
+                      </div>
                     ) : (
                       <a href={file.file_url} target="_blank" rel="noreferrer"
                         className="flex flex-col items-center justify-center h-32 gap-2"
@@ -1823,6 +1837,39 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Лайтбокс ── */}
+      {lightbox && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.93)", backdropFilter: "blur(8px)" }}
+          onClick={() => setLightbox(null)}>
+          <div className="absolute top-4 right-4 flex items-center gap-3">
+            <a href={lightbox.url} download target="_blank" rel="noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+              style={{ background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.15)" }}>
+              <Icon name="Download" size={13} />
+              Скачать
+            </a>
+            <button onClick={() => setLightbox(null)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)" }}>
+              <Icon name="X" size={16} />
+            </button>
+          </div>
+          <img
+            src={lightbox.url}
+            alt={lightbox.name}
+            onClick={e => e.stopPropagation()}
+            className="max-w-[95vw] max-h-[90vh] rounded-xl object-contain"
+            style={{ boxShadow: "0 25px 80px rgba(0,0,0,0.8)" }}
+          />
+          <div className="mt-3 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>{lightbox.name}</div>
+          <div className="mt-1 text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>Нажмите в любом месте чтобы закрыть · ESC</div>
+        </div>,
+        document.body
       )}
 
       {/* ── 3. Тех. карты ── */}
