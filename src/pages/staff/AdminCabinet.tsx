@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { AUTH_URL, SUPPLIER_API, ROLE_LABELS, ROLE_COLORS, ROLE_ICONS, StaffUser, authFetch } from "./staff-types";
+import { AUTH_URL, SUPPLIER_API, ROLE_LABELS, ROLE_COLORS, ROLE_ICONS, ROLES, StaffUser, authFetch } from "./staff-types";
 
 interface StaffMember {
   id: number;
@@ -24,11 +24,13 @@ interface Supplier {
 interface ResetModal {
   type: "staff" | "supplier";
   id: number;
-  login: string; // login для staff, email для supplier
+  login: string;
   name: string;
   newPassword: string;
   confirm: string;
 }
+
+const EMPTY_NEW = { full_name: "", login: "", role_code: "architect", password: "", confirm: "" };
 
 export default function AdminCabinet({ user, token }: { user: StaffUser; token: string }) {
   const [tab, setTab] = useState<"staff" | "suppliers">("staff");
@@ -48,6 +50,11 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
   const [resetModal, setResetModal] = useState<ResetModal | null>(null);
   const [resetting, setResetting] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // Создание сотрудника
+  const [showCreate, setShowCreate] = useState(false);
+  const [newForm, setNewForm] = useState(EMPTY_NEW);
+  const [creating, setCreating] = useState(false);
 
   const loadStaff = useCallback(async () => {
     setStaffLoading(true);
@@ -104,6 +111,28 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
     }
   };
 
+  const doCreate = async () => {
+    if (!newForm.full_name.trim() || !newForm.login.trim() || !newForm.password) {
+      setMsg({ text: "Заполните все поля", ok: false }); return;
+    }
+    if (newForm.password.length < 6) { setMsg({ text: "Пароль минимум 6 символов", ok: false }); return; }
+    if (newForm.password !== newForm.confirm) { setMsg({ text: "Пароли не совпадают", ok: false }); return; }
+    setCreating(true); setMsg(null);
+    const res = await authFetch(AUTH_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "register", login: newForm.login.trim(), full_name: newForm.full_name.trim(), role_code: newForm.role_code, password: newForm.password }),
+    }, token);
+    setCreating(false);
+    if (res.token || res.staff) {
+      setMsg({ text: `Сотрудник «${newForm.full_name}» успешно создан`, ok: true });
+      setShowCreate(false);
+      setNewForm(EMPTY_NEW);
+      loadStaff();
+    } else {
+      setMsg({ text: res.error || "Ошибка создания", ok: false });
+    }
+  };
+
   const roles = Array.from(new Set(staffList.map(s => s.role_code)));
   const filteredStaff = staffList.filter(s => {
     const q = staffSearch.toLowerCase();
@@ -124,12 +153,22 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
           <h2 className="font-display text-2xl font-bold text-white">Управление пользователями</h2>
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{user.full_name}</p>
         </div>
-        <button onClick={() => tab === "staff" ? loadStaff() : loadSuppliers()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all hover:bg-white/10"
-          style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
-          <Icon name="RefreshCw" size={14} />
-          Обновить
-        </button>
+        <div className="flex gap-2">
+          {tab === "staff" && (
+            <button onClick={() => { setShowCreate(v => !v); setMsg(null); setNewForm(EMPTY_NEW); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+              style={{ background: showCreate ? "rgba(225,29,72,0.15)" : "#E11D48", color: "#fff" }}>
+              <Icon name={showCreate ? "X" : "UserPlus"} size={14} />
+              {showCreate ? "Отмена" : "Добавить"}
+            </button>
+          )}
+          <button onClick={() => tab === "staff" ? loadStaff() : loadSuppliers()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all hover:bg-white/10"
+            style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="RefreshCw" size={14} />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {/* Вкладки */}
@@ -184,6 +223,59 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
               </button>
             ))}
           </div>
+
+          {/* Форма создания */}
+          {showCreate && (
+            <div className="rounded-2xl p-5 mb-5 animate-scale-in" style={{ background: "rgba(225,29,72,0.05)", border: "1px solid rgba(225,29,72,0.2)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Icon name="UserPlus" size={15} style={{ color: "#E11D48" }} />
+                <span className="font-semibold text-white text-sm">Новый сотрудник</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>Полное имя</label>
+                  <input value={newForm.full_name} onChange={e => setNewForm(f => ({ ...f, full_name: e.target.value }))}
+                    placeholder="Иванов Иван Иванович"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>Логин</label>
+                  <input value={newForm.login} onChange={e => setNewForm(f => ({ ...f, login: e.target.value }))}
+                    placeholder="ivanov"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>Роль</label>
+                  <select value={newForm.role_code} onChange={e => setNewForm(f => ({ ...f, role_code: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    {ROLES.map(r => <option key={r.code} value={r.code} style={{ background: "#1a1f2e" }}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>Пароль</label>
+                  <input type="password" value={newForm.password} onChange={e => setNewForm(f => ({ ...f, password: e.target.value }))}
+                    placeholder="Минимум 6 символов"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "rgba(255,255,255,0.4)" }}>Повтор пароля</label>
+                  <input type="password" value={newForm.confirm} onChange={e => setNewForm(f => ({ ...f, confirm: e.target.value }))}
+                    placeholder="Повторите пароль"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              </div>
+              <button onClick={doCreate} disabled={creating}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-60"
+                style={{ background: "#E11D48", color: "#fff" }}>
+                {creating ? "Создаю..." : "Создать сотрудника"}
+              </button>
+            </div>
+          )}
 
           <div className="relative mb-4">
             <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "rgba(255,255,255,0.3)" }} />
