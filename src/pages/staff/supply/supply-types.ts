@@ -1,0 +1,5 @@
+export interface RFQRow { id: number; title: string; construction_address: string; area: number; floors: number; house_type: string; items: {name:string;unit:string;qty:number}[]; deadline: string|null; status: string; proposals_count: number; source_type?: string; source_project_id?: number|null; customer_name?: string; customer_phone?: string; }
+export interface ProposalRow { id: number; supplier_id: number; company_name: string; phone: string; email: string; total_amount: number; delivery_days: number; comment: string; status: string; submitted_at: string; }
+export interface SupplierRow { id: number; company_name: string; contact_name: string; email: string; phone: string; categories: string; region: string; is_verified: boolean; }
+export interface InvoiceRow { id: number; invoice_number: string; amount: number; status: string; created_at: string; rfq_title: string; company_name: string; }
+export function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.round(n)); }

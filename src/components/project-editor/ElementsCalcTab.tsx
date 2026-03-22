@@ -24,6 +24,7 @@ type ElementKind =
   | "window" | "door"
   | "roof_pitched" | "roof_flat" | "roof_mansard"
   | "drainage"
+  | "elec_power" | "elec_equipment" | "elec_lighting"
   | "custom";
 
 interface PlacedElement {
@@ -68,15 +69,20 @@ const LIBRARY: LibItem[] = [
   { kind: "roof_flat",       group: "Кровля",    label: "Кровля плоская",      icon: "Minus",        color: "#ef4444", description: "Плоская эксплуатируемая / неэксплуатируемая" },
   { kind: "roof_mansard",    group: "Кровля",    label: "Кровля мансардная",   icon: "TrendingUp",   color: "#ef4444", description: "Ломаная мансардная кровля" },
   { kind: "drainage",        group: "Кровля",    label: "Водосточная система",  icon: "Droplets",     color: "#ef4444", description: "Желоба, трубы, воронки, держатели" },
+  // Электрика
+  { kind: "elec_power",     group: "Электрика", label: "Электроснабжение",     icon: "Zap",          color: "#eab308", description: "Ввод, кабели питания, заземление" },
+  { kind: "elec_equipment", group: "Электрика", label: "Силовое оборудование", icon: "CircuitBoard",  color: "#eab308", description: "Щиты, автоматы, УЗО, розетки" },
+  { kind: "elec_lighting",  group: "Электрика", label: "Электроосвещение",     icon: "Lightbulb",    color: "#eab308", description: "Светильники, выключатели, кабели освещения" },
 ];
 
-const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы", "Кровля"];
+const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы", "Кровля", "Электрика"];
 const GROUP_COLORS: Record<string, string> = {
   "Фундамент":  "#3b82f6",
   "Стены":      "#f59e0b",
   "Перекрытия": "#a855f7",
   "Проёмы":     "#10b981",
   "Кровля":     "#ef4444",
+  "Электрика":  "#eab308",
 };
 
 // ─── Дефолтные параметры по виду ─────────────────────────────────────────────
@@ -122,6 +128,12 @@ function defaultParams(kind: ElementKind, info: ObjectInfo): Record<string, numb
       return { roof_area: area ? area * 1.4 : 0, roofing_material: "Металлочерепица", insulation_thickness: 0.2, rafter_section_w: 0.05, rafter_section_h: 0.2, rafter_step: 0.6 };
     case "drainage":
       return { eaves_perimeter: 0, material: "Сталь оцинкованная", gutter_dia: 125, pipe_dia: 90, downpipe_count: 2, gutter_color: "RAL 8017 Коричневый" };
+    case "elec_power":
+      return { house_area: area || 0, cable_type: "ВВГнг-LS", input_cable_section: 16, input_cable_len: 25, grounding_type: "TN-C-S", ground_electrode_count: 3, ground_electrode_len: 3, input_power_kw: 15 };
+    case "elec_equipment":
+      return { house_area: area || 0, rooms: info.bedrooms + info.bathrooms + 2 || 5, panel_phases: 1, circuit_count: 12, socket_count_per_room: 4, switch_count_per_room: 2, has_bathroom_uzo: true };
+    case "elec_lighting":
+      return { house_area: area || 0, rooms: info.bedrooms + info.bathrooms + 2 || 5, lamp_type: "LED", lamp_count_per_room: 4, cable_section: 1.5, switch_type: "Одноклавишный" };
     default:
       return {};
   }
@@ -445,6 +457,62 @@ function calcVor(kind: ElementKind, p: Record<string, number | string | boolean>
       ];
     }
 
+    case "elec_power": {
+      const cableLen = n("input_cable_len");
+      const cableSection = n("input_cable_section");
+      const electrodeCount = n("ground_electrode_count");
+      const electrodeLen = n("ground_electrode_len");
+      const stripLen = electrodeCount * 1.5 + 6;
+      return [
+        { id: id(), section: "Электроснабжение", name: `Кабель вводной ${p["cable_type"]} ${cableSection}мм² (ввод в дом)`, unit: "п.м", qty: +cableLen.toFixed(1), is_work: false },
+        { id: id(), section: "Электроснабжение", name: `Электрод заземления Ø16мм L=${electrodeLen}м`, unit: "шт", qty: electrodeCount, is_work: false },
+        { id: id(), section: "Электроснабжение", name: "Полоса заземления 40×4мм", unit: "п.м", qty: +stripLen.toFixed(1), is_work: false },
+        { id: id(), section: "Электроснабжение", name: "Муфта соединительная герметичная", unit: "шт", qty: 2, is_work: false },
+        { id: id(), section: "Электроснабжение", name: `Прокладка вводного кабеля ${p["cable_type"]} ${cableSection}мм²`, unit: "п.м", qty: +cableLen.toFixed(1), is_work: true },
+        { id: id(), section: "Электроснабжение", name: `Устройство контура заземления (${p["grounding_type"]})`, unit: "компл", qty: 1, is_work: true },
+        { id: id(), section: "Электроснабжение", name: "Монтаж вводно-распределительного устройства (ВРУ)", unit: "шт", qty: 1, is_work: true },
+      ];
+    }
+
+    case "elec_equipment": {
+      const circuits = n("circuit_count");
+      const rooms = n("rooms") || 5;
+      const socketCount = n("socket_count_per_room") * rooms;
+      const switchCount = n("switch_count_per_room") * rooms;
+      const phases = n("panel_phases");
+      const cableLen = socketCount * 8;
+      return [
+        { id: id(), section: "Силовое оборудование", name: `Щит распределительный ${phases}ф на ${circuits} групп`, unit: "шт", qty: 1, is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Автоматический выключатель 16А", unit: "шт", qty: circuits, is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "УЗО 25А/30мА (ванные, кухня)", unit: "шт", qty: Math.ceil(rooms / 3), is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Розетка 2P+E 16А (IP20)", unit: "шт", qty: socketCount, is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Розетка влагозащищённая IP44 (ванная)", unit: "шт", qty: Math.ceil(rooms * 0.2), is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Кабель ВВГнг-LS 3×2.5мм² (розеточные группы)", unit: "п.м", qty: +cableLen.toFixed(0), is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Гофротруба ПВХ 20мм", unit: "п.м", qty: +(cableLen * 1.1).toFixed(0), is_work: false },
+        { id: id(), section: "Силовое оборудование", name: "Монтаж щита распределительного", unit: "шт", qty: 1, is_work: true },
+        { id: id(), section: "Силовое оборудование", name: "Установка розеток", unit: "шт", qty: socketCount, is_work: true },
+        { id: id(), section: "Силовое оборудование", name: "Прокладка кабеля розеточных групп", unit: "п.м", qty: +cableLen.toFixed(0), is_work: true },
+      ];
+    }
+
+    case "elec_lighting": {
+      const rooms = n("rooms") || 5;
+      const lampsPerRoom = n("lamp_count_per_room");
+      const totalLamps = lampsPerRoom * rooms;
+      const switchCount = rooms;
+      const cableLen = totalLamps * 5;
+      return [
+        { id: id(), section: "Электроосвещение", name: `Светильник потолочный ${p["lamp_type"]} (встраиваемый)`, unit: "шт", qty: totalLamps, is_work: false },
+        { id: id(), section: "Электроосвещение", name: `Выключатель ${p["switch_type"]}`, unit: "шт", qty: switchCount, is_work: false },
+        { id: id(), section: "Электроосвещение", name: `Кабель ВВГнг-LS 3×${n("cable_section")}мм² (освещение)`, unit: "п.м", qty: +cableLen.toFixed(0), is_work: false },
+        { id: id(), section: "Электроосвещение", name: "Гофротруба ПВХ 16мм", unit: "п.м", qty: +(cableLen * 1.05).toFixed(0), is_work: false },
+        { id: id(), section: "Электроосвещение", name: "Клеммная колодка (распред. коробка)", unit: "шт", qty: rooms * 2, is_work: false },
+        { id: id(), section: "Электроосвещение", name: "Монтаж светильников", unit: "шт", qty: totalLamps, is_work: true },
+        { id: id(), section: "Электроосвещение", name: "Установка выключателей", unit: "шт", qty: switchCount, is_work: true },
+        { id: id(), section: "Электроосвещение", name: "Прокладка кабеля осветительных групп", unit: "п.м", qty: +cableLen.toFixed(0), is_work: true },
+      ];
+    }
+
     default:
       return [];
   }
@@ -724,6 +792,38 @@ function ElementParamsForm({ el, onUpdate }: {
         {numField("Диаметр трубы", "pipe_dia", "мм", p, upd)}
         {numField("Кол-во водосточных труб", "downpipe_count", "шт", p, upd)}
         {selField("Цвет", "gutter_color", ["RAL 8017 Коричневый","RAL 9003 Белый","RAL 7024 Графит","RAL 3005 Бордо","RAL 6005 Зелёный","RAL 8004 Медно-коричневый"])}
+      </div>;
+
+    case "elec_power":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь дома", "house_area", "м²", p, upd)}
+        {numField("Мощность ввода", "input_power_kw", "кВт", p, upd)}
+        {selField("Тип кабеля", "cable_type", ["ВВГнг-LS","NYM","КВВГнг","ВБбШв"])}
+        {numField("Сечение вводного кабеля", "input_cable_section", "мм²", p, upd)}
+        {numField("Длина вводного кабеля", "input_cable_len", "п.м", p, upd)}
+        {selField("Схема заземления", "grounding_type", ["TN-C-S","TN-S","TT"])}
+        {numField("Кол-во электродов заземления", "ground_electrode_count", "шт", p, upd)}
+        {numField("Длина электрода", "ground_electrode_len", "м", p, upd)}
+      </div>;
+
+    case "elec_equipment":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь дома", "house_area", "м²", p, upd)}
+        {numField("Количество комнат", "rooms", "шт", p, upd)}
+        {selField("Фазность щита", "panel_phases", ["1","3"])}
+        {numField("Кол-во групп в щите", "circuit_count", "гр", p, upd)}
+        {numField("Розеток на комнату", "socket_count_per_room", "шт", p, upd)}
+        {numField("Выключателей на комнату", "switch_count_per_room", "шт", p, upd)}
+      </div>;
+
+    case "elec_lighting":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь дома", "house_area", "м²", p, upd)}
+        {numField("Количество комнат", "rooms", "шт", p, upd)}
+        {selField("Тип светильника", "lamp_type", ["LED","Люминесцентный","Галогенный","Накаливания"])}
+        {numField("Светильников на комнату", "lamp_count_per_room", "шт", p, upd)}
+        {numField("Сечение кабеля", "cable_section", "мм²", p, upd)}
+        {selField("Тип выключателя", "switch_type", ["Одноклавишный","Двухклавишный","Проходной","Диммер"])}
       </div>;
 
     default:
