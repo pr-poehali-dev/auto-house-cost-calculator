@@ -782,21 +782,137 @@ function VorTable({ rows }: { rows: VorRow[] }) {
 
 // ─── Карточка размещённого элемента ──────────────────────────────────────────
 
+// ─── Редактор состава ВОР ─────────────────────────────────────────────────────
+
+const UNITS_VOR = ["шт","м²","м³","п.м","м","кг","т","уп","компл","рул","л"];
+
+function VorEditor({ rows, onChange }: {
+  rows: VorRow[];
+  onChange: (rows: VorRow[]) => void;
+}) {
+  const newId = () => Math.random().toString(36).slice(2);
+
+  const addRow = (is_work: boolean) => {
+    onChange([...rows, { id: newId(), section: rows[0]?.section || "Прочее", name: "", unit: "шт", qty: 0, is_work }]);
+  };
+
+  const upd = (id: string, patch: Partial<VorRow>) => {
+    onChange(rows.map(r => r.id === id ? { ...r, ...patch } : r));
+  };
+
+  const del = (id: string) => onChange(rows.filter(r => r.id !== id));
+
+  const inp = "w-full px-2 py-1.5 rounded-lg text-xs text-white outline-none bg-transparent";
+  const inpSty = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)" };
+
+  const materials = rows.filter(r => !r.is_work);
+  const works = rows.filter(r => r.is_work);
+
+  return (
+    <div className="space-y-4">
+      {[
+        { label: "Материалы", items: materials, is_work: false, color: "#00D4FF" },
+        { label: "Работы",    items: works,     is_work: true,  color: "#FF6B1A" },
+      ].map(group => (
+        <div key={group.label}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: group.color }} />
+              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: group.color }}>{group.label}</span>
+              <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>({group.items.length})</span>
+            </div>
+            <button onClick={() => addRow(group.is_work)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+              style={{ background: `${group.color}15`, color: group.color, border: `1px dashed ${group.color}44` }}>
+              <Icon name="Plus" size={11} /> Добавить
+            </button>
+          </div>
+
+          {group.items.length === 0 ? (
+            <div className="text-xs py-3 text-center rounded-xl" style={{ border: "1px dashed rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.2)" }}>
+              Нет позиций — нажмите «Добавить»
+            </div>
+          ) : (
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                    <th className="text-left px-3 py-2 font-medium" style={{ color: "rgba(255,255,255,0.3)" }}>Наименование</th>
+                    <th className="text-center px-1 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.3)" }}>Ед.</th>
+                    <th className="text-right px-2 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.3)" }}>Кол-во</th>
+                    <th className="w-7" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.items.map(r => (
+                    <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td className="px-2 py-1.5">
+                        <input
+                          value={r.name}
+                          onChange={e => upd(r.id, { name: e.target.value })}
+                          placeholder="Наименование материала / работы"
+                          className={inp} style={inpSty}
+                        />
+                      </td>
+                      <td className="px-1 py-1.5">
+                        <select value={r.unit} onChange={e => upd(r.id, { unit: e.target.value })}
+                          className={inp} style={{ ...inpSty, background: "#1a2235" }}>
+                          {UNITS_VOR.map(u => <option key={u} value={u} style={{ background: "#1a2235" }}>{u}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          value={r.qty || ""}
+                          onChange={e => upd(r.id, { qty: +e.target.value })}
+                          placeholder="0"
+                          className={`${inp} text-right font-mono font-semibold`}
+                          style={{ ...inpSty, color: group.color }}
+                        />
+                      </td>
+                      <td className="px-1 py-1.5">
+                        <button onClick={() => del(r.id)}
+                          className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20 transition-colors"
+                          style={{ color: "rgba(255,255,255,0.25)" }}>
+                          <Icon name="X" size={11} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Карточка размещённого элемента ──────────────────────────────────────────
+
 function PlacedCard({
-  el, libItem, onUpdate, onRemove, onRename,
+  el, libItem, onUpdate, onRemove, onRename, onVorOverride,
 }: {
   el: PlacedElement;
   libItem: LibItem;
   onUpdate: (params: Record<string, number | string | boolean>) => void;
   onRemove: () => void;
   onRename: (label: string) => void;
+  onVorOverride: (rows: VorRow[]) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const [tab, setTab] = useState<"params" | "vor">("params");
+  const [tab, setTab] = useState<"params" | "vor" | "edit">("params");
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelBuf, setLabelBuf] = useState(el.label);
-  const vor = calcVor(el.kind, el.params);
+
+  // Если vor в элементе заполнен — используем его (кастомный), иначе считаем из параметров
+  const calcedVor = calcVor(el.kind, el.params);
+  const isOverridden = el.vor.length > 0;
+  const vor = isOverridden ? el.vor : calcedVor;
   const hasData = vor.length > 0 && vor.some(r => r.qty > 0);
+
+  const resetToCalc = () => onVorOverride([]);
 
   return (
     <div className="rounded-2xl overflow-hidden mb-3" style={{ border: `1px solid ${libItem.color}33`, background: "rgba(255,255,255,0.02)" }}>
@@ -808,9 +924,7 @@ function PlacedCard({
         </div>
         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setOpen(v => !v)}>
           {editingLabel ? (
-            <input
-              autoFocus
-              value={labelBuf}
+            <input autoFocus value={labelBuf}
               onChange={e => setLabelBuf(e.target.value)}
               onBlur={() => { onRename(labelBuf.trim() || el.label); setEditingLabel(false); }}
               onKeyDown={e => { if (e.key === "Enter") { onRename(labelBuf.trim() || el.label); setEditingLabel(false); } if (e.key === "Escape") { setLabelBuf(el.label); setEditingLabel(false); } }}
@@ -822,15 +936,18 @@ function PlacedCard({
             <div className="text-sm font-semibold text-white">{el.label}</div>
           )}
           {hasData && (
-            <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
-              {vor.filter(r => !r.is_work).length} материалов · {vor.filter(r => r.is_work).length} работ
+            <div className="text-xs mt-0.5 flex items-center gap-2" style={{ color: "rgba(255,255,255,0.35)" }}>
+              <span>{vor.filter(r => !r.is_work).length} матер. · {vor.filter(r => r.is_work).length} работ</span>
+              {isOverridden && (
+                <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24", fontSize: 10 }}>
+                  ✎ изменён
+                </span>
+              )}
             </div>
           )}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          {hasData && (
-            <div className="w-2 h-2 rounded-full mr-1" style={{ background: "#00FF88" }} title="Расчёт готов" />
-          )}
+          {hasData && <div className="w-2 h-2 rounded-full mr-1" style={{ background: "#00FF88" }} title="Расчёт готов" />}
           <button onClick={e => { e.stopPropagation(); setLabelBuf(el.label); setEditingLabel(true); }}
             className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
             style={{ color: "rgba(255,255,255,0.3)" }} title="Переименовать">
@@ -850,25 +967,58 @@ function PlacedCard({
       {/* Тело */}
       {open && (
         <div className="px-4 pb-4 pt-3">
-          {/* Переключатель */}
+          {/* Переключатель вкладок */}
           <div className="flex gap-1 p-0.5 rounded-lg mb-4 w-fit" style={{ background: "rgba(255,255,255,0.04)" }}>
-            {(["params", "vor"] as const).map(t => (
+            {(["params", "vor", "edit"] as const).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                 style={{
                   background: tab === t ? libItem.color : "transparent",
                   color: tab === t ? "#fff" : "rgba(255,255,255,0.45)",
                 }}>
-                {t === "params" ? "Параметры" : `ВОР (${vor.length})`}
+                {t === "params" ? "Параметры"
+                  : t === "vor" ? `ВОР (${vor.length})`
+                  : <span className="flex items-center gap-1"><Icon name="ListChecks" size={11} />Состав</span>}
               </button>
             ))}
           </div>
 
-          {tab === "params" && (
-            <ElementParamsForm el={el} onUpdate={onUpdate} />
-          )}
-          {tab === "vor" && (
-            <VorTable rows={vor} />
+          {tab === "params" && <ElementParamsForm el={el} onUpdate={onUpdate} />}
+
+          {tab === "vor" && <VorTable rows={vor} />}
+
+          {tab === "edit" && (
+            <div>
+              {isOverridden && (
+                <div className="flex items-center justify-between mb-3 px-3 py-2 rounded-xl"
+                  style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                  <span className="text-xs" style={{ color: "#FBBF24" }}>Состав изменён вручную</span>
+                  <button onClick={resetToCalc}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105"
+                    style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24" }}>
+                    Сбросить к расчёту
+                  </button>
+                </div>
+              )}
+              {!isOverridden && calcedVor.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <Icon name="Info" size={13} style={{ color: "rgba(255,255,255,0.3)" }} />
+                  <span className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    Редактируете — состав будет сохранён независимо от параметров
+                  </span>
+                  <button onClick={() => onVorOverride([...calcedVor])}
+                    className="ml-auto text-xs px-2.5 py-1 rounded-lg flex-shrink-0 transition-all hover:scale-105"
+                    style={{ background: `${libItem.color}18`, color: libItem.color, border: `1px solid ${libItem.color}33` }}>
+                    Начать редактирование
+                  </button>
+                </div>
+              )}
+              <VorEditor
+                rows={isOverridden ? el.vor : []}
+                onChange={rows => onVorOverride(rows)}
+              />
+            </div>
           )}
         </div>
       )}
@@ -913,8 +1063,12 @@ export default function ElementsCalcTab({
     onPlacedChange(placed.map(e => e.id === id ? { ...e, label } : e));
   };
 
-  // Сводная ВОР по всем элементам
-  const allVor: VorRow[] = placed.flatMap(el => calcVor(el.kind, el.params));
+  const overrideVor = (id: string, vor: VorRow[]) => {
+    onPlacedChange(placed.map(e => e.id === id ? { ...e, vor } : e));
+  };
+
+  // Сводная ВОР: если у элемента есть кастомный vor — используем его, иначе считаем из параметров
+  const allVor: VorRow[] = placed.flatMap(el => el.vor.length > 0 ? el.vor : calcVor(el.kind, el.params));
   const sections = [...new Set(allVor.map(r => r.section))];
 
   // Группы библиотеки
@@ -997,7 +1151,8 @@ export default function ElementsCalcTab({
                         <PlacedCard key={el.id} el={el} libItem={lib}
                           onUpdate={p => updateEl(el.id, p)}
                           onRemove={() => removeEl(el.id)}
-                          onRename={label => renameEl(el.id, label)} />
+                          onRename={label => renameEl(el.id, label)}
+                          onVorOverride={vor => overrideVor(el.id, vor)} />
                       );
                     })}
                   </div>
