@@ -1,0 +1,900 @@
+import { useState, useEffect, useId } from "react";
+import Icon from "@/components/ui/icon";
+import type { ObjectInfo } from "./ObjectInfoTab";
+
+// ─── Типы ВОР ─────────────────────────────────────────────────────────────────
+
+export interface VorRow {
+  id: string;
+  section: string;
+  name: string;
+  unit: string;
+  qty: number;
+  note?: string;
+  is_work: boolean; // true = работа, false = материал
+}
+
+// ─── Типы элементов ───────────────────────────────────────────────────────────
+
+type ElementKind =
+  | "screw_pile" | "bored_pile" | "driven_pile"
+  | "strip_foundation" | "slab_foundation"
+  | "wall_layer" | "jb_belt"
+  | "floor_slab_deck" | "floor_slab_hollow" | "floor_slab_mono" | "floor_slab_wood"
+  | "window" | "door";
+
+interface PlacedElement {
+  id: string;
+  kind: ElementKind;
+  label: string;
+  params: Record<string, number | string | boolean>;
+  vor: VorRow[];
+}
+
+// ─── Библиотека элементов (описание) ─────────────────────────────────────────
+
+interface LibItem {
+  kind: ElementKind;
+  group: string;
+  label: string;
+  icon: string;
+  color: string;
+  description: string;
+}
+
+const LIBRARY: LibItem[] = [
+  // Фундаменты
+  { kind: "screw_pile",      group: "Фундамент", label: "Свая винтовая",       icon: "Drill",        color: "#3b82f6", description: "Металлическая свая с лопастью" },
+  { kind: "bored_pile",      group: "Фундамент", label: "Свая буронабивная",   icon: "CircleDot",    color: "#3b82f6", description: "Железобетонная буронабивная свая" },
+  { kind: "driven_pile",     group: "Фундамент", label: "Свая забивная",       icon: "ArrowDown",    color: "#3b82f6", description: "Сборная ЖБ забивная свая" },
+  { kind: "strip_foundation",group: "Фундамент", label: "Лента",               icon: "Minus",        color: "#3b82f6", description: "Монолитный ленточный фундамент" },
+  { kind: "slab_foundation", group: "Фундамент", label: "Плита",               icon: "Square",       color: "#3b82f6", description: "Монолитная фундаментная плита" },
+  // Стены
+  { kind: "wall_layer",      group: "Стены",     label: "Стена (слои)",        icon: "Layers",       color: "#f59e0b", description: "Стена с послойным заполнением материалов" },
+  { kind: "jb_belt",         group: "Стены",     label: "ЖБ пояс",             icon: "AlignJustify", color: "#f59e0b", description: "Железобетонный армированный пояс" },
+  // Перекрытия
+  { kind: "floor_slab_deck", group: "Перекрытия",label: "Плита по опалубке",   icon: "LayoutGrid",   color: "#a855f7", description: "По несъёмной профлист-опалубке" },
+  { kind: "floor_slab_hollow",group:"Перекрытия",label: "Плита многопустотная",icon: "Grid3x3",      color: "#a855f7", description: "Сборная многопустотная плита" },
+  { kind: "floor_slab_mono", group: "Перекрытия",label: "Плита монолитная",    icon: "Box",          color: "#a855f7", description: "Монолитная ж/б плита перекрытия" },
+  { kind: "floor_slab_wood", group: "Перекрытия",label: "Перекрытие деревянное",icon:"Columns2",     color: "#a855f7", description: "По деревянным балкам" },
+  // Проёмы
+  { kind: "window",          group: "Проёмы",    label: "Оконный блок",        icon: "AppWindow",    color: "#10b981", description: "Окно с перемычкой" },
+  { kind: "door",            group: "Проёмы",    label: "Дверной блок",        icon: "DoorOpen",     color: "#10b981", description: "Дверь с перемычкой" },
+];
+
+const GROUP_ORDER = ["Фундамент", "Стены", "Перекрытия", "Проёмы"];
+const GROUP_COLORS: Record<string, string> = {
+  "Фундамент":  "#3b82f6",
+  "Стены":      "#f59e0b",
+  "Перекрытия": "#a855f7",
+  "Проёмы":     "#10b981",
+};
+
+// ─── Дефолтные параметры по виду ─────────────────────────────────────────────
+
+function defaultParams(kind: ElementKind, info: ObjectInfo): Record<string, number | string | boolean> {
+  const wallLen = info.ext_wall_thickness > 0 ? 0 : 0; // placeholder
+  const area = info.house_area || 0;
+  const floors = info.floors || 1;
+  const ceilH = info.ceiling_height || 3;
+
+  switch (kind) {
+    case "screw_pile":
+      return { diameter_stem: 0.108, stem_thickness: 4, blade_diameter: 0.3, blade_thickness: 8, capacity: 3, length: 2.5, weight: 60, pile_step: 2.5, wall_len_ext: wallLen, wall_len_int: 0 };
+    case "bored_pile":
+      return { diameter: 0.3, length: 3, rebar_count: 6, rebar_dia: 12, rebar_overlap: 0.4, stirrup_dia: 8, stirrup_step: 0.2, pile_step: 2.5, wall_len_ext: wallLen, wall_len_int: 0 };
+    case "driven_pile":
+      return { length: 6, width: 0.3, thickness: 0.3, mark: "С60.30", pile_step: 2, wall_len_ext: wallLen, wall_len_int: 0 };
+    case "strip_foundation":
+      return { width: 0.5, height: 0.8, height_above: 0.2, rebar_dia: 12, rebar_count: 4, stirrup_dia: 8, stirrup_step: 0.3, backfill_material: "Щебень", backfill_thickness: 0.1, wall_len_ext: wallLen, wall_len_int: 0 };
+    case "slab_foundation":
+      return { area: area || 100, thickness: 0.2, mesh_count: 2, mesh_step: 0.2, rebar_dia: 12, backfill_material: "Щебень", backfill_thickness: 0.1 };
+    case "wall_layer":
+      return { wall_len: wallLen || 0, wall_height: ceilH * floors, layers_json: "[]", wall_type: "Внешняя несущая" };
+    case "jb_belt":
+      return { width: 0.3, height: 0.2, rebar_dia: 12, rebar_count: 4, stirrup_dia: 8, stirrup_step: 0.2, wall_len: wallLen || 0 };
+    case "floor_slab_deck":
+      return { area: area || 0, slab_thickness: 0.12, deck_thickness: 0.8, rebar_dia: 10, mesh_step: 0.2, concrete_class: "B25" };
+    case "floor_slab_hollow":
+      return { area: area || 0, slab_thickness: 0.22 };
+    case "floor_slab_mono":
+      return { area: area || 0, thickness: 0.2, mesh_count: 2, rebar_dia: 12, mesh_step: 0.2, concrete_class: "B25" };
+    case "floor_slab_wood":
+      return { area: area || 0, beam_section_w: 0.1, beam_section_h: 0.2, beam_step: 0.6 };
+    case "window":
+      return { width: 1.2, height: 1.4, material: "ПВХ", profile_thickness: 70, chambers: 2, leaves: 2, opening: "Откидное", count: 1, floor: 1 };
+    case "door":
+      return { width: 0.9, height: 2.1, type: "Входная", material: "Металл", count: 1, floor: 1 };
+    default:
+      return {};
+  }
+}
+
+// ─── Расчёт ВОР для каждого элемента ─────────────────────────────────────────
+
+function calcVor(kind: ElementKind, p: Record<string, number | string | boolean>): VorRow[] {
+  const id = () => Math.random().toString(36).slice(2);
+  const n = (k: string) => Number(p[k]) || 0;
+
+  switch (kind) {
+
+    case "screw_pile": {
+      const wallLen = n("wall_len_ext") + n("wall_len_int");
+      const step = n("pile_step") || 2.5;
+      const count = wallLen > 0 ? Math.ceil(wallLen / step) : 0;
+      const length = n("length");
+      return [
+        { id: id(), section: "Фундамент", name: `Свая винтовая Ø${n("diameter_stem")*1000}×${n("stem_thickness")} L=${length}м`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Фундамент", name: "Монтаж свай винтовых", unit: "шт", qty: count, note: `L=${length}м`, is_work: true },
+      ];
+    }
+
+    case "bored_pile": {
+      const wallLen = n("wall_len_ext") + n("wall_len_int");
+      const step = n("pile_step") || 2.5;
+      const count = wallLen > 0 ? Math.ceil(wallLen / step) : 0;
+      const dia = n("diameter");
+      const len = n("length");
+      const vol1 = Math.PI * (dia/2) ** 2 * len;
+      const volTotal = vol1 * count;
+      const rebarDia = n("rebar_dia");
+      const rebarLen = len + n("rebar_overlap");
+      const rebarCount = n("rebar_count");
+      const rebarTotal = rebarLen * rebarCount * count;
+      const stirrupCirc = Math.PI * dia;
+      const stirrupCount = Math.ceil(len / n("stirrup_step"));
+      const stirrupTotal = stirrupCirc * stirrupCount * count;
+      const rebarWeightPer = rebarDia === 12 ? 0.888 : rebarDia === 14 ? 1.208 : rebarDia === 16 ? 1.578 : 0.617;
+      const stirrupWeightPer = n("stirrup_dia") === 8 ? 0.395 : 0.617;
+      return [
+        { id: id(), section: "Фундамент", name: `Бетон ${n("concrete_class") || "B25"} (сваи Ø${dia*1000})`, unit: "м³", qty: +volTotal.toFixed(3), is_work: false },
+        { id: id(), section: "Фундамент", name: `Арматура основная Ø${rebarDia} А500С`, unit: "т", qty: +(rebarTotal * rebarWeightPer / 1000).toFixed(3), note: `${rebarTotal.toFixed(1)} п.м`, is_work: false },
+        { id: id(), section: "Фундамент", name: `Арматура хомут Ø${n("stirrup_dia")} А240`, unit: "т", qty: +(stirrupTotal * stirrupWeightPer / 1000).toFixed(3), note: `${stirrupTotal.toFixed(1)} п.м`, is_work: false },
+        { id: id(), section: "Фундамент", name: `Бурение скважин Ø${dia*1000}мм`, unit: "м", qty: +(len * count).toFixed(1), is_work: true },
+        { id: id(), section: "Фундамент", name: "Бетонирование буронабивных свай", unit: "м³", qty: +volTotal.toFixed(3), is_work: true },
+      ];
+    }
+
+    case "driven_pile": {
+      const wallLen = n("wall_len_ext") + n("wall_len_int");
+      const step = n("pile_step") || 2;
+      const count = wallLen > 0 ? Math.ceil(wallLen / step) : 0;
+      const length = n("length");
+      return [
+        { id: id(), section: "Фундамент", name: `Свая забивная ${p["mark"]} ${n("width")*1000}×${n("thickness")*1000} L=${length}м`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Фундамент", name: "Погружение свай", unit: "м", qty: +(length * count).toFixed(1), note: `${count} свай по ${length}м`, is_work: true },
+      ];
+    }
+
+    case "strip_foundation": {
+      const totalLen = n("wall_len_ext") + n("wall_len_int");
+      const w = n("width");
+      const h = n("height");
+      const hAbove = n("height_above");
+      const hBelow = h - hAbove;
+      const vol = totalLen * w * h;
+      const rebarDia = n("rebar_dia");
+      const rebarCount = n("rebar_count");
+      const overlap = rebarDia <= 12 ? 0.48 : 0.56;
+      const rawLen = totalLen * rebarCount;
+      const rebarLen = rawLen * (1 + overlap / 11.7);
+      const rebarWeightPer = rebarDia === 12 ? 0.888 : rebarDia === 14 ? 1.208 : rebarDia === 16 ? 1.578 : 0.617;
+      const stirrupDia = n("stirrup_dia");
+      const stirrupCirc = 2 * (w + h) + 0.1;
+      const stirrupCount = Math.ceil(totalLen / n("stirrup_step"));
+      const stirrupLen = stirrupCirc * stirrupCount;
+      const stirrupWeightPer = stirrupDia === 8 ? 0.395 : 0.617;
+      const hydro = 2 * (h + w) * totalLen;
+      const backfillVol = totalLen * w * n("backfill_thickness");
+      const earthVol = totalLen * (w + 0.2) * (hBelow + n("backfill_thickness"));
+      return [
+        { id: id(), section: "Фундамент", name: "Бетон B25 (лента)", unit: "м³", qty: +vol.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: `Арматура Ø${rebarDia} А500С (лента)`, unit: "т", qty: +(rebarLen * rebarWeightPer / 1000).toFixed(3), note: `${rebarLen.toFixed(1)} п.м`, is_work: false },
+        { id: id(), section: "Фундамент", name: `Хомут Ø${stirrupDia} А240 (лента)`, unit: "т", qty: +(stirrupLen * stirrupWeightPer / 1000).toFixed(3), note: `${stirrupLen.toFixed(1)} п.м`, is_work: false },
+        { id: id(), section: "Фундамент", name: `Подсыпка ${p["backfill_material"]}`, unit: "м³", qty: +backfillVol.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: "Гидроизоляция ленты (рулонная)", unit: "м²", qty: +hydro.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: "Земляные работы (траншея)", unit: "м³", qty: +earthVol.toFixed(2), is_work: true },
+        { id: id(), section: "Фундамент", name: "Устройство ленточного фундамента", unit: "м³", qty: +vol.toFixed(2), is_work: true },
+        { id: id(), section: "Фундамент", name: "Послойная трамбовка подсыпки", unit: "м³", qty: +backfillVol.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "slab_foundation": {
+      const area = n("area");
+      const thick = n("thickness");
+      const vol = area * thick;
+      const meshCount = n("mesh_count");
+      const meshStep = n("mesh_step") || 0.2;
+      const rebarDia = n("rebar_dia");
+      const rowsX = Math.ceil(Math.sqrt(area) / meshStep);
+      const rowsY = rowsX;
+      const rebarLen = (rowsX + rowsY) * Math.sqrt(area) * meshCount;
+      const weightPer = rebarDia === 12 ? 0.888 : rebarDia === 14 ? 1.208 : 0.617;
+      const hydro = area * 1.1;
+      const backfillVol = area * n("backfill_thickness");
+      return [
+        { id: id(), section: "Фундамент", name: `Бетон B25 (плита h=${thick*100}см)`, unit: "м³", qty: +vol.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: `Арматура Ø${rebarDia} А500С (плита)`, unit: "т", qty: +(rebarLen * weightPer / 1000).toFixed(3), note: `${rebarLen.toFixed(0)} п.м`, is_work: false },
+        { id: id(), section: "Фундамент", name: `Подсыпка ${p["backfill_material"]}`, unit: "м³", qty: +backfillVol.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: "Гидроизоляция под плитой", unit: "м²", qty: +hydro.toFixed(2), is_work: false },
+        { id: id(), section: "Фундамент", name: "Устройство монолитной плиты", unit: "м³", qty: +vol.toFixed(2), is_work: true },
+        { id: id(), section: "Фундамент", name: "Послойная трамбовка подсыпки", unit: "м³", qty: +backfillVol.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "wall_layer": {
+      const wallLen = n("wall_len");
+      const wallH = n("wall_height");
+      let layers: { name: string; thickness: number }[] = [];
+      try { layers = JSON.parse(String(p["layers_json"] || "[]")); } catch { layers = []; }
+      const rows: VorRow[] = [];
+      for (const layer of layers) {
+        if (!layer.name || !layer.thickness) continue;
+        const vol = wallLen * wallH * layer.thickness;
+        rows.push({ id: id(), section: "Стены", name: layer.name, unit: "м³", qty: +vol.toFixed(2), note: `т=${layer.thickness*1000}мм`, is_work: false });
+      }
+      if (wallLen > 0 && wallH > 0) {
+        rows.push({ id: id(), section: "Стены", name: `Кладка стен (${p["wall_type"]})`, unit: "м²", qty: +(wallLen * wallH).toFixed(2), is_work: true });
+        const hydroArea = wallLen * (layers.reduce((s, l) => s + l.thickness, 0) + 0.1);
+        rows.push({ id: id(), section: "Стены", name: "Гидроизоляция под стену (рулонная)", unit: "м²", qty: +hydroArea.toFixed(2), is_work: false });
+      }
+      return rows;
+    }
+
+    case "jb_belt": {
+      const wallLen = n("wall_len");
+      const w = n("width");
+      const h = n("height");
+      const vol = wallLen * w * h;
+      const rebarDia = n("rebar_dia");
+      const rebarCount = n("rebar_count");
+      const rebarLen = wallLen * rebarCount * 1.1;
+      const weightPer = rebarDia === 12 ? 0.888 : rebarDia === 14 ? 1.208 : 0.617;
+      const stirrupCirc = 2 * (w + h) + 0.1;
+      const stirrupCount = Math.ceil(wallLen / n("stirrup_step"));
+      const stirrupLen = stirrupCirc * stirrupCount;
+      const stirrupWeight = stirrupLen * (n("stirrup_dia") === 8 ? 0.395 : 0.617) / 1000;
+      return [
+        { id: id(), section: "Стены", name: "Бетон B25 (ЖБ пояс)", unit: "м³", qty: +vol.toFixed(2), is_work: false },
+        { id: id(), section: "Стены", name: `Арматура Ø${rebarDia} А500С (пояс)`, unit: "т", qty: +(rebarLen * weightPer / 1000).toFixed(3), is_work: false },
+        { id: id(), section: "Стены", name: `Хомут Ø${n("stirrup_dia")} (пояс)`, unit: "т", qty: +stirrupWeight.toFixed(3), is_work: false },
+        { id: id(), section: "Стены", name: "Устройство ЖБ пояса", unit: "м³", qty: +vol.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "floor_slab_deck": {
+      const area = n("area");
+      const thick = n("slab_thickness");
+      const deckThick = n("deck_thickness");
+      const vol = area * thick;
+      const rebarDia = n("rebar_dia");
+      const meshStep = n("mesh_step") || 0.2;
+      const rows = Math.ceil(Math.sqrt(area) / meshStep) * 2;
+      const rebarLen = rows * Math.sqrt(area);
+      const weightPer = rebarDia === 10 ? 0.617 : rebarDia === 12 ? 0.888 : 0.617;
+      return [
+        { id: id(), section: "Перекрытие", name: `Профлист δ=${deckThick}мм`, unit: "м²", qty: +(area * 1.05).toFixed(2), is_work: false },
+        { id: id(), section: "Перекрытие", name: `Бетон ${p["concrete_class"]} (плита по опалубке)`, unit: "м³", qty: +vol.toFixed(2), is_work: false },
+        { id: id(), section: "Перекрытие", name: `Арматура Ø${rebarDia} А500С`, unit: "т", qty: +(rebarLen * weightPer / 1000).toFixed(3), is_work: false },
+        { id: id(), section: "Перекрытие", name: "Устройство плиты по несъёмной опалубке", unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "floor_slab_hollow": {
+      const area = n("area");
+      return [
+        { id: id(), section: "Перекрытие", name: `Плита многопустотная h=${n("slab_thickness")*100}см`, unit: "м²", qty: +(area * 1.02).toFixed(2), note: "включая обрезку", is_work: false },
+        { id: id(), section: "Перекрытие", name: "Монтаж многопустотных плит", unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "floor_slab_mono": {
+      const area = n("area");
+      const thick = n("thickness");
+      const vol = area * thick;
+      const meshCount = n("mesh_count");
+      const meshStep = n("mesh_step") || 0.2;
+      const rebarDia = n("rebar_dia");
+      const rows = Math.ceil(Math.sqrt(area) / meshStep) * 2;
+      const rebarLen = rows * Math.sqrt(area) * meshCount;
+      const weightPer = rebarDia === 12 ? 0.888 : 0.617;
+      return [
+        { id: id(), section: "Перекрытие", name: `Бетон ${p["concrete_class"]} (монолит h=${thick*100}см)`, unit: "м³", qty: +vol.toFixed(2), is_work: false },
+        { id: id(), section: "Перекрытие", name: `Арматура Ø${rebarDia} А500С`, unit: "т", qty: +(rebarLen * weightPer / 1000).toFixed(3), is_work: false },
+        { id: id(), section: "Перекрытие", name: "Опалубка инвентарная", unit: "м²", qty: +area.toFixed(2), is_work: true },
+        { id: id(), section: "Перекрытие", name: "Бетонирование монолитной плиты", unit: "м³", qty: +vol.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "floor_slab_wood": {
+      const area = n("area");
+      const bW = n("beam_section_w");
+      const bH = n("beam_section_h");
+      const bStep = n("beam_step") || 0.6;
+      const beamLen = Math.sqrt(area);
+      const beamCount = Math.ceil(area / bStep / beamLen);
+      const beamVol = bW * bH * beamLen * beamCount;
+      return [
+        { id: id(), section: "Перекрытие", name: `Балка деревянная ${bW*1000}×${bH*1000}мм`, unit: "м³", qty: +beamVol.toFixed(3), note: `${beamCount} шт`, is_work: false },
+        { id: id(), section: "Перекрытие", name: "Монтаж деревянных балок перекрытия", unit: "м²", qty: +area.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "window": {
+      const count = n("count");
+      const w = n("width");
+      const h = n("height");
+      const area = w * h * count;
+      const lintelLen = (w + 0.3) * count;
+      return [
+        { id: id(), section: "Проёмы", name: `Окно ${p["material"]} ${w*1000}×${h*1000} (${p["leaves"]}ств., ${p["chambers"]}кам.)`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Проёмы", name: `Перемычка оконная L=${((w+0.3)*1000).toFixed(0)}мм`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Проёмы", name: "Монтаж оконных блоков", unit: "м²", qty: +area.toFixed(2), note: `${count} шт`, is_work: true },
+        { id: id(), section: "Проёмы", name: "Установка перемычек оконных", unit: "п.м", qty: +lintelLen.toFixed(2), is_work: true },
+      ];
+    }
+
+    case "door": {
+      const count = n("count");
+      const w = n("width");
+      const h = n("height");
+      const area = w * h * count;
+      const lintelLen = (w + 0.3) * count;
+      return [
+        { id: id(), section: "Проёмы", name: `Дверь ${p["type"]} ${p["material"]} ${w*1000}×${h*1000}мм`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Проёмы", name: `Перемычка дверная L=${((w+0.3)*1000).toFixed(0)}мм`, unit: "шт", qty: count, is_work: false },
+        { id: id(), section: "Проёмы", name: "Монтаж дверных блоков", unit: "м²", qty: +area.toFixed(2), note: `${count} шт`, is_work: true },
+        { id: id(), section: "Проёмы", name: "Установка перемычек дверных", unit: "п.м", qty: +lintelLen.toFixed(2), is_work: true },
+      ];
+    }
+
+    default:
+      return [];
+  }
+}
+
+// ─── Формы параметров по виду ────────────────────────────────────────────────
+
+function ParamField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.45)" }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const inp = "w-full px-2.5 py-2 rounded-lg text-sm text-white outline-none";
+const inpSty = { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" };
+const selSty = { ...inpSty, background: "#1a2235" };
+
+function numField(label: string, key: string, unit: string, p: Record<string, number|string|boolean>, upd: (k: string, v: number|string|boolean) => void) {
+  return (
+    <ParamField key={key} label={`${label} (${unit})`}>
+      <div className="relative">
+        <input type="number" value={Number(p[key]) || ""} onChange={e => upd(key, +e.target.value)}
+          className={inp} style={{ ...inpSty, paddingRight: "2.5rem" }} />
+        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>{unit}</span>
+      </div>
+    </ParamField>
+  );
+}
+
+// Слои стен
+function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [layers, setLayers] = useState<{ name: string; thickness: number }[]>(() => {
+    try { return JSON.parse(value || "[]"); } catch { return []; }
+  });
+
+  const push = () => { const n = [...layers, { name: "", thickness: 0.1 }]; setLayers(n); onChange(JSON.stringify(n)); };
+  const upd = (i: number, k: "name" | "thickness", v: string | number) => {
+    const n = layers.map((l, j) => j === i ? { ...l, [k]: v } : l);
+    setLayers(n); onChange(JSON.stringify(n));
+  };
+  const del = (i: number) => { const n = layers.filter((_, j) => j !== i); setLayers(n); onChange(JSON.stringify(n)); };
+
+  return (
+    <div>
+      <div className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.45)" }}>Слои стены (снаружи → внутри)</div>
+      <div className="space-y-1.5 mb-2">
+        {layers.map((l, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 font-bold" style={{ background: "rgba(245,158,11,0.2)", color: "#f59e0b" }}>{i+1}</div>
+            <input value={l.name} onChange={e => upd(i, "name", e.target.value)}
+              placeholder="Материал (напр. Газоблок D400)" className={`flex-1 ${inp}`} style={inpSty} />
+            <div className="relative w-24 flex-shrink-0">
+              <input type="number" value={l.thickness || ""} onChange={e => upd(i, "thickness", +e.target.value)}
+                step="0.01" className={inp} style={{ ...inpSty, paddingRight: "2.2rem" }} />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>м</span>
+            </div>
+            <button onClick={() => del(i)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20" style={{ color: "rgba(255,255,255,0.3)" }}>
+              <Icon name="X" size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button onClick={push} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105"
+        style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b", border: "1px dashed rgba(245,158,11,0.3)" }}>
+        <Icon name="Plus" size={12} /> Добавить слой
+      </button>
+    </div>
+  );
+}
+
+function ElementParamsForm({ el, onUpdate }: {
+  el: PlacedElement;
+  onUpdate: (params: Record<string, number | string | boolean>) => void;
+}) {
+  const p = el.params;
+  const upd = (k: string, v: number | string | boolean) => onUpdate({ ...p, [k]: v });
+
+  const selField = (label: string, key: string, opts: string[]) => (
+    <ParamField key={key} label={label}>
+      <select value={String(p[key])} onChange={e => upd(key, e.target.value)} className={`${inp} text-sm`} style={selSty}>
+        {opts.map(o => <option key={o} value={o} style={{ background: "#1a2235" }}>{o}</option>)}
+      </select>
+    </ParamField>
+  );
+
+  const sharedWall = (
+    <div className="grid grid-cols-2 gap-2 pt-1 mt-1" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="col-span-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)" }}>Длины стен (из вкладки 1 или вручную)</div>
+      {numField("Длина внешних стен", "wall_len_ext", "м", p, upd)}
+      {numField("Длина внутр. несущих", "wall_len_int", "м", p, upd)}
+      {numField("Шаг свай", "pile_step", "м", p, upd)}
+    </div>
+  );
+
+  switch (el.kind) {
+    case "screw_pile":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Диаметр ствола", "diameter_stem", "м", p, upd)}
+        {numField("Толщина ствола", "stem_thickness", "мм", p, upd)}
+        {numField("Диаметр лопасти", "blade_diameter", "м", p, upd)}
+        {numField("Толщина лопасти", "blade_thickness", "мм", p, upd)}
+        {numField("Несущая способность", "capacity", "т", p, upd)}
+        {numField("Длина сваи", "length", "м", p, upd)}
+        <div className="col-span-2">{sharedWall}</div>
+      </div>;
+
+    case "bored_pile":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Диаметр сваи", "diameter", "м", p, upd)}
+        {numField("Длина сваи", "length", "м", p, upd)}
+        {numField("Кол-во осн. арматуры", "rebar_count", "шт", p, upd)}
+        {numField("Диаметр осн. арматуры", "rebar_dia", "мм", p, upd)}
+        {numField("Выпуск арматуры", "rebar_overlap", "м", p, upd)}
+        {numField("Диаметр хомута", "stirrup_dia", "мм", p, upd)}
+        {numField("Шаг хомута", "stirrup_step", "м", p, upd)}
+        <div className="col-span-2">{sharedWall}</div>
+      </div>;
+
+    case "driven_pile":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Длина сваи", "length", "м", p, upd)}
+        {numField("Ширина сваи", "width", "м", p, upd)}
+        {numField("Толщина сваи", "thickness", "м", p, upd)}
+        {selField("Марка сваи", "mark", ["С60.30","С80.30","С100.30","С120.35","Другая"])}
+        <div className="col-span-2">{sharedWall}</div>
+      </div>;
+
+    case "strip_foundation":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Ширина ленты", "width", "м", p, upd)}
+        {numField("Высота ленты", "height", "м", p, upd)}
+        {numField("Высота над землёй", "height_above", "м", p, upd)}
+        {numField("Ø осн. арматуры", "rebar_dia", "мм", p, upd)}
+        {numField("Кол-во стержней", "rebar_count", "шт", p, upd)}
+        {numField("Ø хомута", "stirrup_dia", "мм", p, upd)}
+        {numField("Шаг хомута", "stirrup_step", "м", p, upd)}
+        {selField("Материал подсыпки", "backfill_material", ["Щебень","Песок","ПГС","Гравий"])}
+        {numField("Толщина подсыпки", "backfill_thickness", "м", p, upd)}
+        <div className="col-span-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8, marginTop: 4 }}>
+          <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "rgba(255,255,255,0.35)" }}>Длины стен (из вкладки 1 или вручную)</div>
+          <div className="grid grid-cols-2 gap-2">
+            {numField("Длина внешних стен", "wall_len_ext", "м", p, upd)}
+            {numField("Длина внутр. несущих", "wall_len_int", "м", p, upd)}
+          </div>
+        </div>
+      </div>;
+
+    case "slab_foundation":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь плиты", "area", "м²", p, upd)}
+        {numField("Толщина плиты", "thickness", "м", p, upd)}
+        {numField("Кол-во сеток", "mesh_count", "шт", p, upd)}
+        {numField("Шаг сетки", "mesh_step", "м", p, upd)}
+        {numField("Ø арматуры", "rebar_dia", "мм", p, upd)}
+        {selField("Материал подсыпки", "backfill_material", ["Щебень","Песок","ПГС","Гравий"])}
+        {numField("Толщина подсыпки", "backfill_thickness", "м", p, upd)}
+      </div>;
+
+    case "wall_layer":
+      return <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          {selField("Вид стены", "wall_type", ["Внешняя несущая","Внутренняя несущая","Перегородка"])}
+          {numField("Длина стен этого вида", "wall_len", "м", p, upd)}
+          {numField("Высота стены", "wall_height", "м", p, upd)}
+        </div>
+        <WallLayersEditor value={String(p["layers_json"] || "[]")} onChange={v => upd("layers_json", v)} />
+      </div>;
+
+    case "jb_belt":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Ширина пояса", "width", "м", p, upd)}
+        {numField("Высота пояса", "height", "м", p, upd)}
+        {numField("Ø осн. арматуры", "rebar_dia", "мм", p, upd)}
+        {numField("Кол-во стержней", "rebar_count", "шт", p, upd)}
+        {numField("Ø хомута", "stirrup_dia", "мм", p, upd)}
+        {numField("Шаг хомута", "stirrup_step", "м", p, upd)}
+        {numField("Длина (периметр стен)", "wall_len", "м", p, upd)}
+      </div>;
+
+    case "floor_slab_deck":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь перекрытия", "area", "м²", p, upd)}
+        {numField("Толщина плиты", "slab_thickness", "м", p, upd)}
+        {numField("Толщина профлиста", "deck_thickness", "мм", p, upd)}
+        {numField("Ø арматуры", "rebar_dia", "мм", p, upd)}
+        {numField("Шаг армирования", "mesh_step", "м", p, upd)}
+        {selField("Класс бетона", "concrete_class", ["B20","B25","B30"])}
+      </div>;
+
+    case "floor_slab_hollow":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь перекрытия", "area", "м²", p, upd)}
+        {numField("Толщина плиты", "slab_thickness", "м", p, upd)}
+      </div>;
+
+    case "floor_slab_mono":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь перекрытия", "area", "м²", p, upd)}
+        {numField("Толщина плиты", "thickness", "м", p, upd)}
+        {numField("Кол-во сеток", "mesh_count", "шт", p, upd)}
+        {numField("Ø арматуры", "rebar_dia", "мм", p, upd)}
+        {numField("Шаг армирования", "mesh_step", "м", p, upd)}
+        {selField("Класс бетона", "concrete_class", ["B20","B25","B30"])}
+      </div>;
+
+    case "floor_slab_wood":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Площадь перекрытия", "area", "м²", p, upd)}
+        {numField("Ширина балки", "beam_section_w", "м", p, upd)}
+        {numField("Высота балки", "beam_section_h", "м", p, upd)}
+        {numField("Шаг балок", "beam_step", "м", p, upd)}
+      </div>;
+
+    case "window":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Ширина окна", "width", "м", p, upd)}
+        {numField("Высота окна", "height", "м", p, upd)}
+        {selField("Материал профиля", "material", ["ПВХ","Алюминий","Дерево","Дерево-алюминий"])}
+        {numField("Толщина профиля", "profile_thickness", "мм", p, upd)}
+        {numField("Кол-во камер", "chambers", "шт", p, upd)}
+        {numField("Кол-во створок", "leaves", "шт", p, upd)}
+        {selField("Тип открывания", "opening", ["Откидное","Поворотно-откидное","Глухое","Раздвижное"])}
+        {numField("Количество окон", "count", "шт", p, upd)}
+        {numField("Этаж", "floor", "эт", p, upd)}
+      </div>;
+
+    case "door":
+      return <div className="grid grid-cols-2 gap-2">
+        {numField("Ширина", "width", "м", p, upd)}
+        {numField("Высота", "height", "м", p, upd)}
+        {selField("Вид двери", "type", ["Входная","Межкомнатная","Техническая"])}
+        {selField("Материал", "material", ["Металл","Дерево","МДФ","Стекло","Алюминий"])}
+        {numField("Количество дверей", "count", "шт", p, upd)}
+        {numField("Этаж", "floor", "эт", p, upd)}
+      </div>;
+
+    default:
+      return null;
+  }
+}
+
+// ─── ВОР таблица ─────────────────────────────────────────────────────────────
+
+function VorTable({ rows }: { rows: VorRow[] }) {
+  if (!rows.length) return (
+    <div className="text-xs text-center py-4" style={{ color: "rgba(255,255,255,0.25)" }}>
+      Заполните параметры — расчёт появится автоматически
+    </div>
+  );
+  const materials = rows.filter(r => !r.is_work);
+  const works = rows.filter(r => r.is_work);
+  return (
+    <div className="space-y-3">
+      {[{ label: "Материалы", rows: materials, color: "#00D4FF" }, { label: "Работы", rows: works, color: "#FF6B1A" }]
+        .filter(g => g.rows.length > 0)
+        .map(g => (
+          <div key={g.label}>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: g.color }}>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: g.color }} /> {g.label}
+            </div>
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                    <th className="text-left px-3 py-2 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Наименование</th>
+                    <th className="text-center px-2 py-2 font-medium w-12" style={{ color: "rgba(255,255,255,0.35)" }}>Ед.</th>
+                    <th className="text-right px-3 py-2 font-medium w-16" style={{ color: "rgba(255,255,255,0.35)" }}>Кол-во</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.rows.map(r => (
+                    <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td className="px-3 py-2 text-white">
+                        {r.name}
+                        {r.note && <span className="ml-1 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>({r.note})</span>}
+                      </td>
+                      <td className="px-2 py-2 text-center" style={{ color: "rgba(255,255,255,0.4)" }}>{r.unit}</td>
+                      <td className="px-3 py-2 text-right font-semibold font-mono" style={{ color: g.color }}>
+                        {r.qty % 1 === 0 ? r.qty : r.qty.toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+// ─── Карточка размещённого элемента ──────────────────────────────────────────
+
+function PlacedCard({
+  el, libItem, onUpdate, onRemove,
+}: {
+  el: PlacedElement;
+  libItem: LibItem;
+  onUpdate: (params: Record<string, number | string | boolean>) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<"params" | "vor">("params");
+  const vor = calcVor(el.kind, el.params);
+  const hasData = vor.length > 0 && vor.some(r => r.qty > 0);
+
+  return (
+    <div className="rounded-2xl overflow-hidden mb-3" style={{ border: `1px solid ${libItem.color}33`, background: "rgba(255,255,255,0.02)" }}>
+      {/* Шапка */}
+      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setOpen(v => !v)}
+        style={{ background: `${libItem.color}0d` }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: `${libItem.color}20` }}>
+          <Icon name={libItem.icon} size={15} style={{ color: libItem.color }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-white">{el.label}</div>
+          {hasData && (
+            <div className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
+              {vor.filter(r => !r.is_work).length} материалов · {vor.filter(r => r.is_work).length} работ
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {hasData && (
+            <div className="w-2 h-2 rounded-full" style={{ background: "#00FF88" }} title="Расчёт готов" />
+          )}
+          <button onClick={e => { e.stopPropagation(); onRemove(); }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-500/20 transition-colors"
+            style={{ color: "rgba(255,255,255,0.3)" }}>
+            <Icon name="Trash2" size={13} />
+          </button>
+          <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} style={{ color: "rgba(255,255,255,0.3)" }} />
+        </div>
+      </div>
+
+      {/* Тело */}
+      {open && (
+        <div className="px-4 pb-4 pt-3">
+          {/* Переключатель */}
+          <div className="flex gap-1 p-0.5 rounded-lg mb-4 w-fit" style={{ background: "rgba(255,255,255,0.04)" }}>
+            {(["params", "vor"] as const).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                style={{
+                  background: tab === t ? libItem.color : "transparent",
+                  color: tab === t ? "#fff" : "rgba(255,255,255,0.45)",
+                }}>
+                {t === "params" ? "Параметры" : `ВОР (${vor.length})`}
+              </button>
+            ))}
+          </div>
+
+          {tab === "params" && (
+            <ElementParamsForm el={el} onUpdate={onUpdate} />
+          )}
+          {tab === "vor" && (
+            <VorTable rows={vor} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Главный компонент ────────────────────────────────────────────────────────
+
+export default function ElementsCalcTab({
+  info,
+  placed,
+  onPlacedChange,
+}: {
+  info: ObjectInfo;
+  placed: PlacedElement[];
+  onPlacedChange: (els: PlacedElement[]) => void;
+}) {
+  const uid = useId();
+
+  // Добавить элемент
+  const addElement = (lib: LibItem) => {
+    const el: PlacedElement = {
+      id: `${uid}-${Date.now()}`,
+      kind: lib.kind,
+      label: lib.label,
+      params: defaultParams(lib.kind, info),
+      vor: [],
+    };
+    onPlacedChange([...placed, el]);
+  };
+
+  const updateEl = (id: string, params: Record<string, number | string | boolean>) => {
+    onPlacedChange(placed.map(e => e.id === id ? { ...e, params } : e));
+  };
+
+  const removeEl = (id: string) => {
+    onPlacedChange(placed.filter(e => e.id !== id));
+  };
+
+  // Сводная ВОР по всем элементам
+  const allVor: VorRow[] = placed.flatMap(el => calcVor(el.kind, el.params));
+  const sections = [...new Set(allVor.map(r => r.section))];
+
+  // Группы библиотеки
+  const groups = GROUP_ORDER.map(g => ({ group: g, items: LIBRARY.filter(l => l.group === g) }));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: "#FF6B1A" }}>Вкладка 2</div>
+          <h3 className="font-display font-bold text-xl text-white">Расчёт по элементам</h3>
+        </div>
+        {allVor.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs" style={{ background: "rgba(0,255,136,0.08)", color: "#00FF88", border: "1px solid rgba(0,255,136,0.2)" }}>
+            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            ВОР рассчитана · {allVor.length} позиций
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-5" style={{ alignItems: "flex-start" }}>
+
+        {/* ── Левая колонка: библиотека ── */}
+        <div className="flex-shrink-0 w-64">
+          <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>Библиотека элементов</div>
+          <div className="space-y-4">
+            {groups.map(({ group, items }) => (
+              <div key={group}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 rounded-full" style={{ background: GROUP_COLORS[group] }} />
+                  <span className="text-xs font-semibold" style={{ color: GROUP_COLORS[group] }}>{group}</span>
+                </div>
+                <div className="space-y-1">
+                  {items.map(lib => (
+                    <button key={lib.kind} onClick={() => addElement(lib)}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all hover:scale-[1.02] group"
+                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${lib.color}22` }}>
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all group-hover:scale-110"
+                        style={{ background: `${lib.color}18` }}>
+                        <Icon name={lib.icon} size={13} style={{ color: lib.color }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-white truncate">{lib.label}</div>
+                        <div className="text-xs truncate mt-0.5" style={{ color: "rgba(255,255,255,0.3)" }}>{lib.description}</div>
+                      </div>
+                      <Icon name="Plus" size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: lib.color }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Правая колонка: размещённые элементы ── */}
+        <div className="flex-1 min-w-0">
+          {placed.length === 0 ? (
+            <div className="rounded-2xl p-12 text-center" style={{ border: "2px dashed rgba(255,255,255,0.08)" }}>
+              <Icon name="MousePointerClick" size={36} style={{ color: "rgba(255,255,255,0.12)", margin: "0 auto 12px" }} />
+              <div className="text-white font-semibold mb-1">Добавьте элементы из библиотеки</div>
+              <div className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>Нажмите на элемент слева — он появится здесь с формой параметров и автоматическим расчётом ВОР</div>
+            </div>
+          ) : (
+            <>
+              <div className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
+                Состав проекта · {placed.length} элем.
+              </div>
+              {groups.map(({ group }) => {
+                const els = placed.filter(e => LIBRARY.find(l => l.kind === e.kind)?.group === group);
+                if (!els.length) return null;
+                return (
+                  <div key={group} className="mb-5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full" style={{ background: GROUP_COLORS[group] }} />
+                      <span className="text-sm font-semibold" style={{ color: GROUP_COLORS[group] }}>{group}</span>
+                    </div>
+                    {els.map(el => {
+                      const lib = LIBRARY.find(l => l.kind === el.kind)!;
+                      return (
+                        <PlacedCard key={el.id} el={el} libItem={lib}
+                          onUpdate={p => updateEl(el.id, p)}
+                          onRemove={() => removeEl(el.id)} />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {/* Сводная ВОР */}
+              {allVor.length > 0 && (
+                <div className="rounded-2xl p-5 mt-4" style={{ background: "rgba(0,255,136,0.04)", border: "1px solid rgba(0,255,136,0.15)" }}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Icon name="FileSpreadsheet" size={16} style={{ color: "#00FF88" }} />
+                    <span className="font-semibold text-white text-sm">Сводная ведомость объёмов работ</span>
+                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(0,255,136,0.1)", color: "#00FF88" }}>
+                      {allVor.length} позиций
+                    </span>
+                  </div>
+                  {sections.map(sec => {
+                    const rows = allVor.filter(r => r.section === sec);
+                    return (
+                      <div key={sec} className="mb-4">
+                        <div className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>{sec}</div>
+                        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                                <th className="text-left px-3 py-2 font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>Наименование</th>
+                                <th className="text-center px-2 py-2 font-medium w-16" style={{ color: "rgba(255,255,255,0.35)" }}>Ед.</th>
+                                <th className="text-right px-3 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.35)" }}>Кол-во</th>
+                                <th className="text-center px-2 py-2 font-medium w-20" style={{ color: "rgba(255,255,255,0.35)" }}>Тип</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map(r => (
+                                <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                                  <td className="px-3 py-2 text-white">
+                                    {r.name}
+                                    {r.note && <span className="ml-1" style={{ color: "rgba(255,255,255,0.35)" }}>({r.note})</span>}
+                                  </td>
+                                  <td className="px-2 py-2 text-center" style={{ color: "rgba(255,255,255,0.4)" }}>{r.unit}</td>
+                                  <td className="px-3 py-2 text-right font-semibold font-mono" style={{ color: r.is_work ? "#FF6B1A" : "#00D4FF" }}>
+                                    {r.qty % 1 === 0 ? r.qty : r.qty.toFixed(3)}
+                                  </td>
+                                  <td className="px-2 py-2 text-center">
+                                    <span className="px-1.5 py-0.5 rounded text-xs" style={{
+                                      background: r.is_work ? "rgba(255,107,26,0.12)" : "rgba(0,212,255,0.1)",
+                                      color: r.is_work ? "#FF6B1A" : "#00D4FF",
+                                    }}>{r.is_work ? "Работа" : "Матер."}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

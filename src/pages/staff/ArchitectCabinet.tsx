@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import Icon from "@/components/ui/icon";
 import DocUploadManager from "@/components/project-editor/DocUploadManager";
 import ObjectInfoTab, { type ObjectInfo, EMPTY_INFO } from "@/components/project-editor/ObjectInfoTab";
+import ElementsCalcTab, { type VorRow } from "@/components/project-editor/ElementsCalcTab";
 import type { AiItem } from "@/pages/staff/materials-types";
+type PlacedElement = { id: string; kind: string; label: string; params: Record<string, number | string | boolean>; vor: VorRow[]; };
 
 const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 const TTK_URL = "https://functions.poehali.dev/aa8514d2-9f4a-46fc-80af-a91de8aa4b62";
@@ -1237,7 +1239,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
 function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project; token: string; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<"info" | "files" | "docs" | "tech">("info");
+  const [tab, setTab] = useState<"info" | "calc" | "files" | "docs" | "tech">("info");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -1246,6 +1248,7 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   const [pendingDocItems, setPendingDocItems] = useState<AiItem[] | null>(null);
   const [objectInfo, setObjectInfo] = useState<ObjectInfo>(EMPTY_INFO);
   const [infoSaving, setInfoSaving] = useState(false);
+  const [placedElements, setPlacedElements] = useState<PlacedElement[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadProject = useCallback(async () => {
@@ -1290,10 +1293,11 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
   };
 
   const TABS = [
-    { id: "info",  label: "1. Информация об объекте", icon: "ClipboardList" },
-    { id: "files", label: "2. Загрузка документов",   icon: "Upload",       count: proj.files?.length },
-    { id: "tech",  label: "3. Тех. карты",            icon: "BookOpen" },
-    { id: "docs",  label: "4. Документация",          icon: "FolderOpen",   highlight: pendingDocItems ? pendingDocItems.length : 0 },
+    { id: "info",  label: "1. Информация",   icon: "ClipboardList" },
+    { id: "calc",  label: "2. Расчёт",       icon: "Calculator",  count: placedElements.length || undefined },
+    { id: "files", label: "3. Документы",    icon: "Upload",      count: proj.files?.length || undefined },
+    { id: "tech",  label: "4. Тех. карты",   icon: "BookOpen" },
+    { id: "docs",  label: "5. Документация", icon: "FolderOpen",  highlight: pendingDocItems ? pendingDocItems.length : 0 },
   ] as const;
 
   const filesByType = FILE_TYPES.map(ft => ({
@@ -1359,6 +1363,15 @@ function ProjectDetail({ project, token, onBack, onRefresh }: { project: Project
           onChange={patch => setObjectInfo(prev => ({ ...prev, ...patch }))}
           onSave={saveInfo}
           saving={infoSaving}
+        />
+      )}
+
+      {/* ── 2. Расчёт по элементам ── */}
+      {tab === "calc" && (
+        <ElementsCalcTab
+          info={objectInfo}
+          placed={placedElements}
+          onPlacedChange={setPlacedElements}
         />
       )}
 
