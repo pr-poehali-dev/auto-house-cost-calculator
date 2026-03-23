@@ -1954,7 +1954,7 @@ function CrmLeadModal({ lead, token, sources, onClose, onUpdated }: {
                   <Icon name={addingComment ? "Loader" : "Send"} size={14} className={addingComment ? "animate-spin" : ""} />
                 </button>
               </div>
-              <div className="space-y-2 max-h-72 overflow-y-auto">
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto">
                 {(fullLead.events || []).map(e => (
                   <div key={e.id} className="flex gap-2.5 text-xs px-3 py-2 rounded-xl"
                     style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>

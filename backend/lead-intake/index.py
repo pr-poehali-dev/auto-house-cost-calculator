@@ -159,12 +159,12 @@ def handler(event: dict, context) -> dict:
             comment_parts.append(f"Ссылки: {', '.join(urls)}")
         if extra_emails:
             comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
-        comment_parts.append(f"\n--- Текст письма ---\n{text[:1500]}")
+        comment_parts.append(f"\n--- Текст письма ---\n{text}")
         comment = "\n".join(comment_parts)
         lead_id = create_lead(name=from_name[:128], phone=phone, email=from_email,
                               source_id=SOURCE_IDS["email"],
                               source_detail=f"Email: {subject[:100]}" if subject else "Email заявка",
-                              comment=comment[:2000])
+                              comment=comment)
         notify_bitrix(lead_id, from_name, phone or from_email, "Email")
         return resp({"ok": True, "lead_id": lead_id})
 

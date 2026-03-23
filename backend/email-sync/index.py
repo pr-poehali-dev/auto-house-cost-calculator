@@ -92,7 +92,7 @@ def get_body(msg) -> str:
         else:
             plain = payload
     body = plain or strip_html(html)
-    return body[:3000]
+    return body
 
 
 def extract_phones(text: str) -> list[str]:
@@ -277,7 +277,7 @@ def create_lead(conn, name: str, phone: str, email_addr: str,
     lead_id = cur.fetchone()[0]
     cur.execute(
         f"INSERT INTO {S}.crm_events (lead_id, type, content, new_stage) VALUES (%s,'created',%s,'new')",
-        (lead_id, comment[:2000]))
+        (lead_id, comment))
     conn.commit()
     cur.close()
     return lead_id
@@ -428,7 +428,7 @@ def handler(event: dict, context) -> dict:
                     comment_parts.append(f"Email: {service_data['client_email']}")
                 if service_data["client_message"]:
                     comment_parts.append(f"Сообщение: {service_data['client_message']}")
-                comment_parts.append(f"\n--- Полный текст ---\n{body[:1200]}")
+                comment_parts.append(f"\n--- Полный текст письма ---\n{body}")
                 comment = "\n".join(comment_parts)
                 lead_id = create_lead(
                     conn=conn, name=lead_name, phone=lead_phone,
@@ -450,7 +450,7 @@ def handler(event: dict, context) -> dict:
                     comment_parts.append(f"Ссылки: {', '.join(urls)}")
                 if extra_emails:
                     comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
-                comment_parts.append(f"\n--- Текст письма ---\n{body[:1500]}")
+                comment_parts.append(f"\n--- Текст письма ---\n{body}")
                 comment = "\n".join(comment_parts)
                 lead_id = create_lead(
                     conn=conn, name=from_name, phone=phone,
