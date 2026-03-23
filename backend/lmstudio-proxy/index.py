@@ -24,7 +24,7 @@ def get_lm_url(conn):
     cur.execute(f"SELECT value FROM {S}.app_settings WHERE key='lmstudio_url' LIMIT 1")
     row = cur.fetchone()
     cur.close()
-    return row[0] if row else "http://192.168.1.123:1234"
+    return row[0] if row else "http://87.117.11.177:4321"
 
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":

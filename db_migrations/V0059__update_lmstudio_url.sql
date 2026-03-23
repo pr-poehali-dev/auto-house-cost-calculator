@@ -1,0 +1,1 @@
+UPDATE app_settings SET value = 'http://87.117.11.177:4321' WHERE key = 'lmstudio_url';
