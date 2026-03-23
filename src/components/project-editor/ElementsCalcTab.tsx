@@ -577,25 +577,47 @@ function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: st
   };
   const del = (i: number) => { const n = layers.filter((_, j) => j !== i); setLayers(n); onChange(JSON.stringify(n)); };
 
+  const PRESETS: { label: string; mm: number }[] = [
+    { label: "10", mm: 10 }, { label: "15", mm: 15 }, { label: "20", mm: 20 },
+    { label: "50", mm: 50 }, { label: "100", mm: 100 }, { label: "200", mm: 200 },
+    { label: "300", mm: 300 }, { label: "400", mm: 400 },
+  ];
+
   return (
     <div>
       <div className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.45)" }}>Слои стены (снаружи → внутри)</div>
-      <div className="space-y-1.5 mb-2">
+      <div className="space-y-2 mb-2">
         {layers.map((l, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 font-bold" style={{ background: "rgba(245,158,11,0.2)", color: "#f59e0b" }}>{i+1}</div>
-            <input value={l.name} onChange={e => upd(i, "name", e.target.value)}
-              placeholder="Материал (напр. Газоблок D400)" className={`flex-1 ${inp}`} style={inpSty} />
-            <div className="relative w-28 flex-shrink-0">
-              <input type="number" value={l.thickness ? Math.round(l.thickness * 1000) : ""}
-                onChange={e => upd(i, "thickness", +e.target.value)}
-                step="1" min="1" placeholder="400"
-                className={inp} style={{ ...inpSty, paddingRight: "2.6rem" }} />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>мм</span>
+          <div key={i} className="rounded-lg p-2 space-y-1.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 font-bold" style={{ background: "rgba(245,158,11,0.2)", color: "#f59e0b" }}>{i+1}</div>
+              <input value={l.name} onChange={e => upd(i, "name", e.target.value)}
+                placeholder="Материал (напр. Газоблок D400)" className={`flex-1 ${inp}`} style={inpSty} />
+              <div className="relative w-24 flex-shrink-0">
+                <input type="number" value={l.thickness ? Math.round(l.thickness * 1000) : ""}
+                  onChange={e => upd(i, "thickness", +e.target.value)}
+                  step="1" min="1" placeholder="400"
+                  className={inp} style={{ ...inpSty, paddingRight: "2.6rem", textAlign: "center" }} />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>мм</span>
+              </div>
+              <button onClick={() => del(i)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20 flex-shrink-0" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <Icon name="X" size={11} />
+              </button>
             </div>
-            <button onClick={() => del(i)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20" style={{ color: "rgba(255,255,255,0.3)" }}>
-              <Icon name="X" size={11} />
-            </button>
+            <div className="flex flex-wrap gap-1 pl-7">
+              {PRESETS.map(pr => {
+                const active = l.thickness && Math.round(l.thickness * 1000) === pr.mm;
+                return (
+                  <button key={pr.mm} type="button" onClick={() => upd(i, "thickness", pr.mm)}
+                    className="px-2 py-0.5 rounded text-xs transition-all"
+                    style={active
+                      ? { background: "rgba(245,158,11,0.35)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.5)" }
+                      : { background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
+                    }>{pr.label}</button>
+                );
+              })}
+              <span className="text-xs self-center" style={{ color: "rgba(255,255,255,0.2)" }}>мм</span>
+            </div>
           </div>
         ))}
       </div>
