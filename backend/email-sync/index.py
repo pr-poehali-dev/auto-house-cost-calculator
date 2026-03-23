@@ -127,6 +127,101 @@ def extract_email_addresses(text: str, exclude: str = "") -> list[str]:
     return list(found)[:5]
 
 
+SERVICE_SENDERS = {
+    "jivosite.com": "JivoSite",
+    "jivo.ru": "JivoSite",
+    "tildamail.com": "Tilda",
+    "tilda.cc": "Tilda",
+    "bitrix24.ru": "Битрикс24",
+    "bitrix24.com": "Битрикс24",
+    "callbackhunter.com": "CallbackHunter",
+    "envybox.io": "Envybox",
+    "marquiz.ru": "Marquiz",
+    "roistat.com": "Roistat",
+    "lptracker.ru": "LPTracker",
+    "calltouch.ru": "Calltouch",
+}
+
+
+def parse_service_email(from_email: str, subject: str, body: str) -> dict | None:
+    """Парсит письмо от JivoSite, Tilda и других сервисов, возвращает данные клиента"""
+    domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
+    service = None
+    for srv_domain, srv_name in SERVICE_SENDERS.items():
+        if srv_domain in domain:
+            service = srv_name
+            break
+    if not service:
+        return None
+
+    full = f"{subject}\n{body}"
+    result = {"service": service, "site_url": None, "client_name": None,
+              "client_email": None, "client_phone": None, "client_message": None}
+
+    site_match = re.search(r"https?://[^\s<>\"']+", f"{subject} {body}")
+    if site_match:
+        result["site_url"] = site_match.group(0).rstrip("./)")
+
+    jivo_name = re.search(r"(?:от|from)\s+([A-Za-zА-Яа-яЁё0-9\s]+?)(?:\s*$|\s*\n)", subject)
+    if jivo_name:
+        result["client_name"] = jivo_name.group(1).strip()
+
+    name_patterns = [
+        r"(?:Имя|Name|Клиент|Посетитель|ФИО|Контакт)[:\s]+([^\n<]{2,60})",
+        r"(?:имя|name|клиент)[:\s]+([^\n<]{2,60})",
+    ]
+    for pat in name_patterns:
+        m = re.search(pat, full, re.I)
+        if m:
+            val = m.group(1).strip().strip("\"'")
+            if val and len(val) > 1 and not val.startswith("http"):
+                result["client_name"] = val
+                break
+
+    phone_patterns = [
+        r"(?:Телефон|Phone|Тел|Номер)[:\s]+([\+\d\s\-\(\)]{10,20})",
+        r"(?:телефон|phone|тел)[:\s]+([\+\d\s\-\(\)]{10,20})",
+    ]
+    for pat in phone_patterns:
+        m = re.search(pat, full, re.I)
+        if m:
+            clean = re.sub(r"[^\d+]", "", m.group(1))
+            if len(clean) >= 10:
+                result["client_phone"] = clean
+                break
+
+    email_patterns = [
+        r"(?:Email|E-mail|Почта|Mail)[:\s]+([\w\.\-+]+@[\w\.\-]+\.\w{2,})",
+        r"(?:email|почта|mail)[:\s]+([\w\.\-+]+@[\w\.\-]+\.\w{2,})",
+    ]
+    for pat in email_patterns:
+        m = re.search(pat, full, re.I)
+        if m:
+            result["client_email"] = m.group(1).strip()
+            break
+
+    msg_patterns = [
+        r"(?:Сообщение|Message|Текст|Вопрос|Комментарий)[:\s]+(.{5,500}?)(?:\n\s*\n|\n(?:Имя|Телефон|Email|Phone|---)|$)",
+        r"(?:сообщение|message|текст сообщения)[:\s]+(.{5,500}?)(?:\n\s*\n|$)",
+    ]
+    for pat in msg_patterns:
+        m = re.search(pat, full, re.I | re.DOTALL)
+        if m:
+            result["client_message"] = m.group(1).strip()[:500]
+            break
+
+    if not result["client_phone"]:
+        phones = extract_phones(full)
+        if phones:
+            result["client_phone"] = phones[0]
+    if not result["client_email"]:
+        emails = extract_email_addresses(full, exclude=from_email)
+        if emails:
+            result["client_email"] = emails[0]
+
+    return result
+
+
 def email_lead_exists(conn, from_email: str, subject: str) -> bool:
     """Проверяем — нет ли уже лида с таким email и темой за последние 24ч"""
     cur = conn.cursor()
@@ -268,49 +363,76 @@ def handler(event: dict, context) -> dict:
             if not from_email:
                 continue
 
-            # Пропускаем рассылки и уведомления
             skip_keywords = ["noreply", "no-reply", "donotreply", "mailer", "notification",
-                             "support@", "info@avito", "yandex.ru"]
-            if any(kw in from_email.lower() for kw in skip_keywords):
+                             "support@", "info@avito", "yandex.ru",
+                             "subscribe@", "news@", "promo@", "marketing@",
+                             "digest@", "newsletter@", "timeweb.cloud"]
+            el = from_email.lower()
+            if any(kw in el for kw in skip_keywords):
                 skipped.append({"email": from_email, "reason": "рассылка"})
                 continue
 
-            # Проверяем дубли
-            if email_lead_exists(conn, from_email, subject):
-                skipped.append({"email": from_email, "reason": "дубль"})
-                continue
-
-            full_text = f"{subject} {body}"
-            phones = extract_phones(full_text)
-            phone = phones[0] if phones else None
-            urls = extract_urls(full_text)
-            extra_emails = extract_email_addresses(full_text, exclude=from_email)
-
-            source_detail = f"Email: {subject[:80]}" if subject else "Входящее письмо"
-
-            comment_parts = [f"От: {from_name} <{from_email}>", f"Тема: {subject}"]
-            if phones:
-                comment_parts.append(f"Телефоны: {', '.join(phones)}")
-            if urls:
-                comment_parts.append(f"Ссылки: {', '.join(urls)}")
-            if extra_emails:
-                comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
-            comment_parts.append(f"\n--- Текст письма ---\n{body[:1500]}")
-            comment = "\n".join(comment_parts)
-
-            lead_id = create_lead(
-                conn=conn,
-                name=from_name,
-                phone=phone,
-                email_addr=from_email,
-                source_detail=source_detail,
-                comment=comment,
-            )
-            created.append({"lead_id": lead_id, "from": from_email, "subject": subject,
-                            "phone": phone, "urls": urls})
-            print(f"[email-sync] Создан лид #{lead_id} — {from_name} <{from_email}>")
-
-            notify_bitrix(lead_id, from_name, source_detail)
+            service_data = parse_service_email(from_email, subject, body)
+            if service_data:
+                dedup_email = service_data["client_email"] or from_email
+                if email_lead_exists(conn, dedup_email, subject):
+                    skipped.append({"email": dedup_email, "reason": "дубль"})
+                    continue
+                lead_name = service_data["client_name"] or f"Заявка {service_data['service']}"
+                lead_phone = service_data["client_phone"]
+                lead_email = service_data["client_email"] or from_email
+                site_url = service_data["site_url"]
+                src = f"{service_data['service']}: {subject[:60]}" if subject else service_data["service"]
+                if site_url:
+                    src = f"{service_data['service']} ({site_url[:80]})"
+                comment_parts = [f"Источник: {service_data['service']}"]
+                if site_url:
+                    comment_parts.append(f"Сайт: {site_url}")
+                if service_data["client_name"]:
+                    comment_parts.append(f"Клиент: {service_data['client_name']}")
+                if lead_phone:
+                    comment_parts.append(f"Телефон: {lead_phone}")
+                if service_data["client_email"]:
+                    comment_parts.append(f"Email: {service_data['client_email']}")
+                if service_data["client_message"]:
+                    comment_parts.append(f"Сообщение: {service_data['client_message']}")
+                comment_parts.append(f"\n--- Полный текст ---\n{body[:1200]}")
+                comment = "\n".join(comment_parts)
+                lead_id = create_lead(
+                    conn=conn, name=lead_name, phone=lead_phone,
+                    email_addr=lead_email, source_detail=src[:256], comment=comment)
+            else:
+                if email_lead_exists(conn, from_email, subject):
+                    skipped.append({"email": from_email, "reason": "дубль"})
+                    continue
+                full_text = f"{subject} {body}"
+                phones = extract_phones(full_text)
+                phone = phones[0] if phones else None
+                urls = extract_urls(full_text)
+                extra_emails = extract_email_addresses(full_text, exclude=from_email)
+                source_detail = f"Email: {subject[:80]}" if subject else "Входящее письмо"
+                comment_parts = [f"От: {from_name} <{from_email}>", f"Тема: {subject}"]
+                if phones:
+                    comment_parts.append(f"Телефоны: {', '.join(phones)}")
+                if urls:
+                    comment_parts.append(f"Ссылки: {', '.join(urls)}")
+                if extra_emails:
+                    comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
+                comment_parts.append(f"\n--- Текст письма ---\n{body[:1500]}")
+                comment = "\n".join(comment_parts)
+                lead_id = create_lead(
+                    conn=conn, name=from_name, phone=phone,
+                    email_addr=from_email, source_detail=source_detail, comment=comment)
+            if service_data:
+                created.append({"lead_id": lead_id, "from": lead_email, "subject": subject,
+                                "service": service_data["service"], "site": service_data.get("site_url")})
+                print(f"[email-sync] Лид #{lead_id} из {service_data['service']} — {lead_name} <{lead_email}>")
+                notify_bitrix(lead_id, lead_name, src[:256])
+            else:
+                created.append({"lead_id": lead_id, "from": from_email, "subject": subject,
+                                "phone": phone, "urls": urls})
+                print(f"[email-sync] Лид #{lead_id} — {from_name} <{from_email}>")
+                notify_bitrix(lead_id, from_name, source_detail)
 
         except Exception as e:
             print(f"[email-sync] Ошибка обработки письма {eid}: {e}")
