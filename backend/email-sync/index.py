@@ -158,9 +158,14 @@ def parse_service_email(from_email: str, subject: str, body: str) -> dict | None
     result = {"service": service, "site_url": None, "client_name": None,
               "client_email": None, "client_phone": None, "client_message": None}
 
-    site_match = re.search(r"https?://[^\s<>\"']+", f"{subject} {body}")
-    if site_match:
-        result["site_url"] = site_match.group(0).rstrip("./)")
+    service_domains = ["jivosite.com", "jivo.ru", "tilda.cc", "tildamail.com",
+                       "bitrix24.ru", "bitrix24.com", "callbackhunter.com",
+                       "envybox.io", "marquiz.ru", "app.jivo.chat"]
+    for m in re.finditer(r"https?://[^\s<>\"']+", f"{subject} {body}"):
+        url = m.group(0).rstrip("./)")
+        if not any(sd in url.lower() for sd in service_domains):
+            result["site_url"] = url
+            break
 
     jivo_name = re.search(r"(?:от|from)\s+([A-Za-zА-Яа-яЁё0-9\s]+?)(?:\s*$|\s*\n)", subject)
     if jivo_name:
@@ -169,12 +174,13 @@ def parse_service_email(from_email: str, subject: str, body: str) -> dict | None
     name_patterns = [
         r"(?:Имя|Name|Клиент|Посетитель|ФИО|Контакт)[:\s]+([^\n<]{2,60})",
         r"(?:имя|name|клиент)[:\s]+([^\n<]{2,60})",
+        r"\bОт[:\s]+([A-Za-zА-Яа-яЁё0-9][^\n<]{1,59})",
     ]
     for pat in name_patterns:
-        m = re.search(pat, full, re.I)
+        m = re.search(pat, body, re.I)
         if m:
             val = m.group(1).strip().strip("\"'")
-            if val and len(val) > 1 and not val.startswith("http"):
+            if val and len(val) > 1 and not val.startswith("http") and "@" not in val:
                 result["client_name"] = val
                 break
 
@@ -201,13 +207,28 @@ def parse_service_email(from_email: str, subject: str, body: str) -> dict | None
             break
 
     msg_patterns = [
-        r"(?:Сообщение|Message|Текст|Вопрос|Комментарий)[:\s]+(.{5,500}?)(?:\n\s*\n|\n(?:Имя|Телефон|Email|Phone|---)|$)",
+        r"(?:Сообщение|Message|Текст|Вопрос|Комментарий)[:\s]+(.{5,500}?)(?:\n\s*\n|\n(?:Имя|Телефон|Email|Phone|От|Информация|---)|$)",
         r"(?:сообщение|message|текст сообщения)[:\s]+(.{5,500}?)(?:\n\s*\n|$)",
     ]
     for pat in msg_patterns:
         m = re.search(pat, full, re.I | re.DOTALL)
         if m:
             result["client_message"] = m.group(1).strip()[:500]
+            break
+
+    if not result["client_message"] and service == "JivoSite":
+        lines = [l.strip() for l in body.split("\n") if l.strip()]
+        skip_phrases = ["сообщение с сайта", "информация о клиенте", "от:", "телефон:",
+                        "email:", "чтобы узнать", "подключите", "ответить в приложении",
+                        "client ", "скачать для", "скачать msi", "если отвечать",
+                        "конверсия", "будьте на связи", "скачайте приложение"]
+        for line in lines:
+            ll = line.lower()
+            if any(sp in ll for sp in skip_phrases):
+                continue
+            if line.startswith("http") or len(line) < 5:
+                continue
+            result["client_message"] = line[:500]
             break
 
     if not result["client_phone"]:
