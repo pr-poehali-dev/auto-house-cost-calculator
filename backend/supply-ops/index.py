@@ -6,7 +6,8 @@ import psycopg2
 from datetime import datetime
 
 S = "t_p78845984_auto_house_cost_calc"
-LM_PROXY_URL = "https://functions.poehali.dev/74ffb742-4148-4545-b5bc-953fbc29c1ea"
+LM_URL = "http://87.117.11.177:4321"
+LM_MODEL = "gemma-3-4b-it"
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -84,18 +85,22 @@ SYSTEM_PROMPTS = {
 }
 
 def lm_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
-    payload = {"messages": messages, "temperature": temperature}
+    payload = {
+        "model": LM_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
     req = urllib.request.Request(
-        f"{LM_PROXY_URL}?action=chat",
+        f"{LM_URL}/v1/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode(),
         headers={"Content-Type": "application/json"},
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=120) as r:
         result = json.loads(r.read().decode())
-    if not result.get("ok"):
-        raise Exception(result.get("error", "LM Studio error"))
-    return result["reply"].strip()
+    return result["choices"][0]["message"]["content"].strip()
 
 def get_openai_response(messages: list, role: str) -> str:
     system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
