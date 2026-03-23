@@ -1,0 +1,1 @@
+UPDATE app_settings SET value = 'gemma-3-4b-it' WHERE key = 'lmstudio_model';
