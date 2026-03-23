@@ -42,17 +42,23 @@ def decode_str(s):
 
 
 def strip_html(html: str) -> str:
-    """Грубая очистка HTML в текст"""
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
-    text = re.sub(r"</(p|div|tr|li|h\d)>", "\n", text, flags=re.I)
+    """Очистка HTML в текст"""
+    text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.I | re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.I | re.DOTALL)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</(p|div|tr|li|h\d|td|th)>", "\n", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"&nbsp;", " ", text)
     text = re.sub(r"&amp;", "&", text)
     text = re.sub(r"&lt;", "<", text)
     text = re.sub(r"&gt;", ">", text)
     text = re.sub(r"&quot;", '"', text)
+    text = re.sub(r"&#\d+;", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
+    lines = [l.strip() for l in text.split("\n")]
+    text = "\n".join(l for l in lines if l)
     return text.strip()
 
 
@@ -216,20 +222,25 @@ def parse_service_email(from_email: str, subject: str, body: str) -> dict | None
             result["client_message"] = m.group(1).strip()[:500]
             break
 
-    if not result["client_message"] and service == "JivoSite":
+    if service == "JivoSite":
         lines = [l.strip() for l in body.split("\n") if l.strip()]
         skip_phrases = ["сообщение с сайта", "информация о клиенте", "от:", "телефон:",
                         "email:", "чтобы узнать", "подключите", "ответить в приложении",
-                        "client ", "скачать для", "скачать msi", "если отвечать",
-                        "конверсия", "будьте на связи", "скачайте приложение"]
+                        "client", "скачать для", "скачать msi", "если отвечать",
+                        "конверсия", "будьте на связи", "скачайте приложение",
+                        "jivo", "приложении"]
+        candidates = []
         for line in lines:
             ll = line.lower()
             if any(sp in ll for sp in skip_phrases):
                 continue
-            if line.startswith("http") or len(line) < 5:
+            if line.startswith("http") or len(line) < 5 or "@" in line:
                 continue
-            result["client_message"] = line[:500]
-            break
+            if re.match(r"^[\d\s\+\-\(\)]+$", line):
+                continue
+            candidates.append(line)
+        if candidates:
+            result["client_message"] = candidates[0][:500]
 
     if not result["client_phone"]:
         phones = extract_phones(full)
