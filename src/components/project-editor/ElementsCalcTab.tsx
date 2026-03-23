@@ -534,23 +534,28 @@ const inp = "w-full px-2.5 py-2 rounded-lg text-sm text-white outline-none";
 const inpSty = { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" };
 const selSty = { ...inpSty, background: "#1a2235" };
 
-function numField(label: string, key: string, unit: string, p: Record<string, number|string|boolean>, upd: (k: string, v: number|string|boolean) => void, step = 0.01) {
+const UNIT_STEP: Record<string, number> = {
+  "м": 0.1, "м²": 1, "м³": 0.1, "мм": 1, "мм²": 10,
+  "шт": 1, "т": 0.1, "п.м": 0.5, "°": 1, "эт": 1, "гр": 1, "кВт": 0.5,
+};
+function numField(label: string, key: string, unit: string, p: Record<string, number|string|boolean>, upd: (k: string, v: number|string|boolean) => void, step?: number) {
+  const s = step ?? UNIT_STEP[unit] ?? 0.1;
   const val = Number(p[key]) || 0;
-  const dec = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+  const dec = s < 0.1 ? 2 : s < 1 ? 1 : 0;
   const adj = (d: number) => upd(key, +Math.max(0, val + d).toFixed(dec));
   return (
     <ParamField key={key} label={`${label} (${unit})`}>
       <div className="flex items-center gap-1">
-        <button type="button" onClick={() => adj(-step)}
+        <button type="button" onClick={() => adj(-s)}
           className="flex-shrink-0 w-7 h-8 rounded text-sm font-bold flex items-center justify-center select-none"
           style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}>−</button>
         <div className="relative flex-1">
           <input type="number" value={val || ""} onChange={e => upd(key, +e.target.value)}
-            step={step} min={0}
+            step={s} min={0}
             className={inp} style={{ ...inpSty, paddingRight: "2.5rem", textAlign: "center" }} />
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>{unit}</span>
         </div>
-        <button type="button" onClick={() => adj(step)}
+        <button type="button" onClick={() => adj(s)}
           className="flex-shrink-0 w-7 h-8 rounded text-sm font-bold flex items-center justify-center select-none"
           style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}>+</button>
       </div>
