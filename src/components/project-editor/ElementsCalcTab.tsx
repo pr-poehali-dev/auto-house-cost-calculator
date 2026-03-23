@@ -260,8 +260,13 @@ function calcVor(kind: ElementKind, p: Record<string, number | string | boolean>
       const rows: VorRow[] = [];
       for (const layer of layers) {
         if (!layer.name || !layer.thickness) continue;
-        const vol = wallLen * wallH * layer.thickness;
-        rows.push({ id: id(), section: "Стены", name: layer.name, unit: "м³", qty: +vol.toFixed(2), note: `т=${layer.thickness*1000}мм`, is_work: false });
+        if (isAreaLayer(layer.name)) {
+          const area = wallLen * wallH;
+          rows.push({ id: id(), section: "Стены", name: layer.name, unit: "м²", qty: +area.toFixed(2), note: `т=${layer.thickness*1000}мм`, is_work: false });
+        } else {
+          const vol = wallLen * wallH * layer.thickness;
+          rows.push({ id: id(), section: "Стены", name: layer.name, unit: "м³", qty: +vol.toFixed(2), note: `т=${layer.thickness*1000}мм`, is_work: false });
+        }
       }
       if (wallLen > 0 && wallH > 0) {
         rows.push({ id: id(), section: "Стены", name: `Кладка стен (${p["wall_type"]})`, unit: "м²", qty: +(wallLen * wallH).toFixed(2), is_work: true });
@@ -564,6 +569,12 @@ function numField(label: string, key: string, unit: string, p: Record<string, nu
 }
 
 // Слои стен
+const AREA_KEYWORDS = ["штукатурк", "шпаклёвк", "шпаклевк", "грунтовк", "краск", "покраск", "отделк", "облицовк", "плитк", "обои"];
+function isAreaLayer(name: string) {
+  const low = name.toLowerCase();
+  return AREA_KEYWORDS.some(kw => low.includes(kw));
+}
+
 function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [layers, setLayers] = useState<{ name: string; thickness: number }[]>(() => {
     try { return JSON.parse(value || "[]"); } catch { return []; }
@@ -600,6 +611,10 @@ function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: st
                   className={inp} style={{ ...inpSty, paddingRight: "2.6rem", textAlign: "center" }} />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>мм</span>
               </div>
+              <div className="flex-shrink-0 text-xs px-1.5 py-0.5 rounded" style={isAreaLayer(l.name)
+                ? { background: "rgba(59,130,246,0.15)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.3)" }
+                : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)", border: "1px solid rgba(255,255,255,0.1)" }
+              }>{isAreaLayer(l.name) ? "м²" : "м³"}</div>
               <button onClick={() => del(i)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20 flex-shrink-0" style={{ color: "rgba(255,255,255,0.3)" }}>
                 <Icon name="X" size={11} />
               </button>
