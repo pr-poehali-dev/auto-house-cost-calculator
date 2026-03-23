@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { AUTH_URL, SUPPLIER_API, ROLE_LABELS, ROLE_COLORS, ROLE_ICONS, ROLES, StaffUser, authFetch } from "./staff-types";
 
+const LM_PROXY_URL = "https://functions.poehali.dev/74ffb742-4148-4545-b5bc-953fbc29c1ea";
+
 interface StaffMember {
   id: number;
   login: string;
@@ -44,8 +46,17 @@ interface StaffContact {
 
 const EMPTY_NEW = { full_name: "", login: "", role_code: "architect", password: "", confirm: "" };
 
+interface AiPrompt { role_code: string; role_label: string; system_prompt: string; }
+
 export default function AdminCabinet({ user, token }: { user: StaffUser; token: string }) {
-  const [tab, setTab] = useState<"staff" | "suppliers" | "contacts">("staff");
+  const [tab, setTab] = useState<"staff" | "suppliers" | "contacts" | "ai_prompts">("staff");
+
+  // ИИ промпты
+  const [aiPrompts, setAiPrompts] = useState<AiPrompt[]>([]);
+  const [aiPromptsLoading, setAiPromptsLoading] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<string | null>(null);
+  const [promptBuf, setPromptBuf] = useState("");
+  const [savingPrompt, setSavingPrompt] = useState(false);
 
   // Контакты сотрудников
   const [contactsList, setContactsList] = useState<StaffContact[]>([]);
@@ -108,9 +119,29 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
     loadContacts();
   };
 
+  const loadAiPrompts = useCallback(async () => {
+    setAiPromptsLoading(true);
+    const res = await authFetch(`${LM_PROXY_URL}?action=get_prompts`, {}, token);
+    setAiPrompts(Array.isArray(res.prompts) ? res.prompts : []);
+    setAiPromptsLoading(false);
+  }, [token]);
+
+  const savePrompt = async (roleCode: string, roleLabel: string) => {
+    setSavingPrompt(true);
+    await authFetch(`${LM_PROXY_URL}?action=save_prompt`, {
+      method: "POST",
+      body: JSON.stringify({ role_code: roleCode, role_label: roleLabel, system_prompt: promptBuf }),
+    }, token);
+    setSavingPrompt(false);
+    setEditingPrompt(null);
+    setPromptBuf("");
+    loadAiPrompts();
+  };
+
   useEffect(() => { loadStaff(); }, [loadStaff]);
   useEffect(() => { if (tab === "suppliers" && suppliers.length === 0) loadSuppliers(); }, [tab]);
   useEffect(() => { if (tab === "contacts") loadContacts(); }, [tab, loadContacts]);
+  useEffect(() => { if (tab === "ai_prompts") loadAiPrompts(); }, [tab, loadAiPrompts]);
 
   const openStaffReset = (m: StaffMember) => {
     setMsg(null);
@@ -163,6 +194,18 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
     }, token);
     setCreating(false);
     if (res.token || res.staff) {
+      const roleLabel = ROLE_LABELS[newForm.role_code] || newForm.role_code;
+      const existingPrompt = await authFetch(`${LM_PROXY_URL}?action=get_prompt&role_code=${newForm.role_code}`, {}, token);
+      if (!existingPrompt.system_prompt || existingPrompt.system_prompt.startsWith("Ты — ИИ-ассистент сотрудника")) {
+        await authFetch(`${LM_PROXY_URL}?action=save_prompt`, {
+          method: "POST",
+          body: JSON.stringify({
+            role_code: newForm.role_code,
+            role_label: roleLabel,
+            system_prompt: `Ты — ИИ-ассистент сотрудника в должности «${roleLabel}» строительной компании. Помогай в рабочих вопросах, связанных с этой должностью. Отвечай профессионально и по делу.`,
+          }),
+        }, token);
+      }
       setMsg({ text: `Сотрудник «${newForm.full_name}» успешно создан`, ok: true });
       setShowCreate(false);
       setNewForm(EMPTY_NEW);
@@ -216,6 +259,7 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
           { key: "staff", label: "Сотрудники", count: staffList.length, icon: "Users" },
           { key: "suppliers", label: "Поставщики", count: suppliers.length, icon: "Truck" },
           { key: "contacts", label: "Уведомления", count: 0, icon: "Bell" },
+          { key: "ai_prompts", label: "ИИ-ассистенты", count: aiPrompts.length, icon: "Bot" },
         ] as const).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
@@ -606,6 +650,90 @@ export default function AdminCabinet({ user, token }: { user: StaffUser; token: 
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── ВКЛАДКА: ИИ-АССИСТЕНТЫ ── */}
+      {tab === "ai_prompts" && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid rgba(255,255,255,0.07)" }}>
+          <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(0,212,255,0.12)" }}>
+              <Icon name="Bot" size={16} style={{ color: "#00D4FF" }} />
+            </div>
+            <div>
+              <div className="font-semibold text-white text-sm">Системные промпты ИИ-ассистентов</div>
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Настройте поведение ассистента для каждой должности</div>
+            </div>
+          </div>
+          {aiPromptsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Icon name="Loader" size={20} className="animate-spin" style={{ color: "rgba(255,255,255,0.3)" }} />
+            </div>
+          ) : (
+            <div className="divide-y" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+              {aiPrompts.map(p => {
+                const color = ROLE_COLORS[p.role_code] || "#00D4FF";
+                const icon = ROLE_ICONS[p.role_code] || "User";
+                return (
+                  <div key={p.role_code} className="px-5 py-4">
+                    {editingPrompt === p.role_code ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Icon name={icon as "User"} size={14} style={{ color }} />
+                          <span className="font-medium text-sm text-white">{p.role_label}</span>
+                        </div>
+                        <textarea
+                          value={promptBuf}
+                          onChange={e => setPromptBuf(e.target.value)}
+                          rows={8}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none resize-none leading-relaxed"
+                          style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${color}40`, fontFamily: "monospace" }}
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={() => savePrompt(p.role_code, p.role_label)} disabled={savingPrompt}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold"
+                            style={{ background: "#E11D48", color: "#fff" }}>
+                            <Icon name={savingPrompt ? "Loader" : "Save"} size={13} className={savingPrompt ? "animate-spin" : ""} />
+                            Сохранить
+                          </button>
+                          <button onClick={() => { setEditingPrompt(null); setPromptBuf(""); }}
+                            className="px-4 py-2 rounded-xl text-sm"
+                            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                            Отмена
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                          style={{ background: `${color}18`, border: `1px solid ${color}30` }}>
+                          <Icon name={icon as "User"} size={14} style={{ color }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm text-white mb-1">{p.role_label}</div>
+                          <div className="text-xs leading-relaxed line-clamp-2" style={{ color: "rgba(255,255,255,0.4)" }}>
+                            {p.system_prompt}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => { setEditingPrompt(p.role_code); setPromptBuf(p.system_prompt); }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium flex-shrink-0 transition-all hover:scale-105"
+                          style={{ background: `${color}15`, color, border: `1px solid ${color}30` }}>
+                          <Icon name="Pencil" size={12} />
+                          Изменить
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {aiPrompts.length === 0 && (
+                <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  Промпты не найдены. Обновите страницу.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

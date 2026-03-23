@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "Get settings",
+      "method": "GET",
+      "path": "/?action=get_settings",
+      "expectedStatus": 200,
+      "expectedBody": {"url": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get models list",
+      "method": "GET",
+      "path": "/?action=models",
+      "expectedStatus": 200,
+      "expectedBody": {"models": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

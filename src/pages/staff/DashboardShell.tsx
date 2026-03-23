@@ -1,13 +1,13 @@
 import Icon from "@/components/ui/icon";
 import ChatWidget, { type ChatRole } from "@/components/ChatWidget";
+import AiAssistant from "@/components/AiAssistant";
 import { StaffUser, ROLE_LABELS, ROLE_COLORS, ROLE_ICONS } from "./staff-types";
 
 export default function DashboardShell({ user, token, onLogout, children, globalTab, onGlobalTab }: {
   user: StaffUser; token: string; onLogout: () => void; children: React.ReactNode;
   globalTab: string; onGlobalTab: (t: "main" | "ttk" | "settings") => void;
 }) {
-  // token is passed through to ChatWidget context
-  void token;
+
 
   const color = ROLE_COLORS[user.role_code] || "#fff";
   const icon = ROLE_ICONS[user.role_code] || "User";
@@ -35,6 +35,7 @@ export default function DashboardShell({ user, token, onLogout, children, global
           </div>
 
           <div className="flex items-center gap-3">
+            <AiAssistant roleCode={user.role_code} token={token} />
             <button onClick={() => onGlobalTab("main")}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
               style={{ background: globalTab === "main" ? "rgba(255,255,255,0.1)" : "transparent", color: globalTab === "main" ? "#fff" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>

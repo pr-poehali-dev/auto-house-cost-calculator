@@ -1,4 +1,5 @@
 {
+  "lmstudio-proxy": "https://functions.poehali.dev/74ffb742-4148-4545-b5bc-953fbc29c1ea",
   "email-sync": "https://functions.poehali.dev/47124c44-a436-4db5-9fdf-542cf14bb7cf",
   "avito-sync": "https://functions.poehali.dev/511c97fe-5f02-4410-b267-767e247c4c5f",
   "lead-intake": "https://functions.poehali.dev/19977969-cc2b-48a7-9ab2-d2922551ede2",
