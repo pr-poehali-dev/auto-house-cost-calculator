@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+import { ProjectDetail, type Project as ArchProject } from "./ArchitectCabinet";
 
 const ORDER_URL = "https://functions.poehali.dev/5cd1eb69-9a08-4572-ae2a-bc11e49da506";
 const COMPANY_URL = "https://functions.poehali.dev/0796a927-18d1-46be-bd26-3bbcfe93738d";
@@ -2261,12 +2262,9 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
 
 // ─── Approval Tab ────────────────────────────────────────────────────────────
 
-function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: string }) {
-  const [projects, setProjects] = useState<ReviewProject[]>([]);
+function ApprovalTab({ user, token, onOpenProject }: { user: SalesManagerProps["user"]; token: string; onOpenProject: (p: ArchProject) => void }) {
+  const [projects, setProjects] = useState<ArchProject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [comment, setComment] = useState("");
-  const [actionLoading, setActionLoading] = useState(false);
 
   const loadProjects = useCallback(() => {
     setLoading(true);
@@ -2285,20 +2283,6 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
     (p) => (p.calc_status === "approved" || p.calc_status === "rejected") && p.assigned_reviewer === user.id
   );
 
-  const handleAction = (projectId: number, action: "approve" | "reject") => {
-    if (action === "reject" && !comment.trim()) return;
-    setActionLoading(true);
-    apiFetch(`${PROJECTS_URL}?action=${action}`, {
-      method: "POST",
-      body: JSON.stringify({ project_id: projectId, comment: comment.trim() }),
-    }, token).then(() => {
-      setActionLoading(false);
-      setExpandedId(null);
-      setComment("");
-      loadProjects();
-    }).catch(() => setActionLoading(false));
-  };
-
   const statusColor = (s: string) =>
     s === "submitted" ? "#00D4FF" : s === "approved" ? "#00FF88" : s === "rejected" ? "#EF4444" : "rgba(255,255,255,0.4)";
 
@@ -2315,7 +2299,6 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
 
   return (
     <div className="space-y-6">
-      {/* Pending reviews */}
       <div>
         <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
           <Icon name="Clock" size={18} style={{ color: "#00D4FF" }} />
@@ -2337,19 +2320,21 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
         ) : (
           <div className="space-y-3">
             {pending.map((p) => (
-              <div key={p.id} className="rounded-2xl p-4 transition-all" style={CARD_S}>
-                <div
-                  className="flex items-start justify-between cursor-pointer"
-                  onClick={() => { setExpandedId(expandedId === p.id ? null : p.id); setComment(""); }}
-                >
+              <div
+                key={p.id}
+                className="rounded-2xl p-4 transition-all cursor-pointer hover:scale-[1.01]"
+                style={CARD_S}
+                onClick={() => onOpenProject(p)}
+              >
+                <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-white font-semibold text-sm truncate">{p.name}</span>
                       <span
                         className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
-                        style={{ background: `${statusColor(p.calc_status)}20`, color: statusColor(p.calc_status) }}
+                        style={{ background: `${statusColor(p.calc_status || "")}20`, color: statusColor(p.calc_status || "") }}
                       >
-                        {statusLabel(p.calc_status)}
+                        {statusLabel(p.calc_status || "")}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
@@ -2363,91 +2348,25 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
                         </span>
                       )}
                     </div>
-                    {p.submitted_at && (
+                    {p.created_at && (
                       <p className="text-xs mt-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>
-                        Отправлено: {relativeTime(p.submitted_at)}
+                        Отправлено: {relativeTime(p.created_at)}
                       </p>
                     )}
                   </div>
-                  <Icon
-                    name={expandedId === p.id ? "ChevronUp" : "ChevronDown"}
-                    size={16}
-                    style={{ color: "rgba(255,255,255,0.3)" }}
-                    className="shrink-0 mt-1"
-                  />
-                </div>
-
-                {expandedId === p.id && (
-                  <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                    {/* Files */}
-                    {p.files && p.files.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-medium mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>Файлы проекта:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {p.files.map((f, i) => (
-                            <a
-                              key={i}
-                              href={f.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
-                              style={{ background: "rgba(255,255,255,0.06)", color: "#00D4FF" }}
-                            >
-                              <Icon name="FileDown" size={12} />
-                              {f.file_type}
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Comment */}
-                    <div className="mb-3">
-                      <label className="block text-xs font-medium mb-1.5" style={LBL_S}>
-                        Комментарий {<span style={{ color: "rgba(255,255,255,0.25)" }}>(обязателен при отклонении)</span>}
-                      </label>
-                      <textarea
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Ваш комментарий..."
-                        rows={3}
-                        className={INP}
-                        style={INP_S}
-                        onFocus={focusOn as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
-                        onBlur={blurOn as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
-                      />
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleAction(p.id, "approve")}
-                        disabled={actionLoading}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                        style={{ background: "#00FF88", color: "#0a0d14" }}
-                      >
-                        <Icon name={actionLoading ? "Loader2" : "Check"} size={14} className={actionLoading ? "animate-spin" : ""} />
-                        Согласовать
-                      </button>
-                      <button
-                        onClick={() => handleAction(p.id, "reject")}
-                        disabled={actionLoading || !comment.trim()}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                        style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.3)" }}
-                      >
-                        <Icon name={actionLoading ? "Loader2" : "X"} size={14} className={actionLoading ? "animate-spin" : ""} />
-                        Отклонить
-                      </button>
-                    </div>
+                  <div className="flex items-center gap-2 shrink-0 mt-1">
+                    <span className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ background: "rgba(0,255,136,0.1)", color: "#00FF88", border: "1px solid rgba(0,255,136,0.2)" }}>
+                      Рассмотреть
+                    </span>
+                    <Icon name="ChevronRight" size={16} style={{ color: "rgba(255,255,255,0.3)" }} />
                   </div>
-                )}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Recently reviewed */}
       {reviewed.length > 0 && (
         <div>
           <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
@@ -2456,15 +2375,20 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
           </h3>
           <div className="space-y-2">
             {reviewed.map((p) => (
-              <div key={p.id} className="rounded-xl p-3 flex items-center justify-between" style={CARD_S}>
+              <div
+                key={p.id}
+                className="rounded-xl p-3 flex items-center justify-between cursor-pointer hover:opacity-80 transition-all"
+                style={CARD_S}
+                onClick={() => onOpenProject(p)}
+              >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-white text-sm font-medium truncate">{p.name}</span>
                     <span
                       className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
-                      style={{ background: `${statusColor(p.calc_status)}20`, color: statusColor(p.calc_status) }}
+                      style={{ background: `${statusColor(p.calc_status || "")}20`, color: statusColor(p.calc_status || "") }}
                     >
-                      {statusLabel(p.calc_status)}
+                      {statusLabel(p.calc_status || "")}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
@@ -2478,6 +2402,7 @@ function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: 
                     </p>
                   )}
                 </div>
+                <Icon name="ChevronRight" size={14} style={{ color: "rgba(255,255,255,0.2)" }} />
               </div>
             ))}
           </div>
@@ -2496,6 +2421,7 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
   const [pendingCount, setPendingCount] = useState(0);
   const [view, setView] = useState<"list" | "detail">("list");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedProject, setSelectedProject] = useState<ArchProject | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [showNewModal, setShowNewModal] = useState(false);
 
@@ -2536,6 +2462,29 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
     { id: "lost", label: "Проигран" },
   ];
 
+  if (selectedProject) {
+    return (
+      <ProjectDetail
+        project={selectedProject}
+        token={token}
+        user={user}
+        onBack={() => {
+          setSelectedProject(null);
+          apiFetch(`${PROJECTS_URL}?action=list`, {}, token).then((r) => {
+            const all: ReviewProject[] = r.projects || [];
+            setPendingCount(all.filter((p) => p.calc_status === "submitted" && p.assigned_reviewer === user.id).length);
+          }).catch(() => {});
+        }}
+        onRefresh={() => {
+          apiFetch(`${PROJECTS_URL}?action=list`, {}, token).then((r) => {
+            const all: ReviewProject[] = r.projects || [];
+            setPendingCount(all.filter((p) => p.calc_status === "submitted" && p.assigned_reviewer === user.id).length);
+          }).catch(() => {});
+        }}
+      />
+    );
+  }
+
   if (view === "detail" && selectedId !== null) {
     return (
       <OrderDetail
@@ -2573,7 +2522,7 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
             )}
           </button>
         </div>
-        <ApprovalTab user={user} token={token} />
+        <ApprovalTab user={user} token={token} onOpenProject={(p) => setSelectedProject(p)} />
       </div>
     );
   }

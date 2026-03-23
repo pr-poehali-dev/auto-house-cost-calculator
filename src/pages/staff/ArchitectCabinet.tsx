@@ -79,9 +79,9 @@ function fmt(n: number) { return new Intl.NumberFormat("ru-RU").format(Math.roun
 
 // ─── interfaces ──────────────────────────────────────────────────────────────
 
-interface StaffUser { id: number; full_name: string; role_code: string; }
+export interface StaffUser { id: number; full_name: string; role_code: string; }
 
-interface Project {
+export interface Project {
   id: number; name: string; type: string; area: number; floors: number;
   rooms: number; price: number; tag: string; tag_color: string;
   description: string; features: string; is_active: boolean;
@@ -97,7 +97,6 @@ interface Project {
   door_info: string; staircase_info: string;
   roof_material: string; roof_area: string; roof_style: string;
   heating_type: string; water_supply: string; sewage: string; electrical: string;
-  // Блокировка и согласование
   calc_status?: string;
   locked_by?: number | null;
   locked_by_name?: string | null;
@@ -1247,7 +1246,7 @@ function AiAssistantTab({ proj, token, onApply }: {
 
 // ─── ProjectDetail ─────────────────────────────────────────────────────────────
 
-function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: Project; token: string; user: StaffUser; onBack: () => void; onRefresh: () => void }) {
+export function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: Project; token: string; user: StaffUser; onBack: () => void; onRefresh: () => void }) {
   const [tab, setTab] = useState<"info" | "calc" | "files" | "docs" | "tech">("info");
   const [proj, setProj] = useState(project);
   const [uploading, setUploading] = useState(false);
