@@ -161,9 +161,12 @@ def handler(event: dict, context) -> dict:
         _, folders_raw = mail.list()
         folders = []
         for f in folders_raw:
-            parts = f.decode().split('"/"')
-            folder_name = parts[-1].strip().strip('"')
-            folders.append(folder_name)
+            decoded = f.decode()
+            # Формат: (\Flags) "/" "folder_name" или (\Flags) "|" folder_name
+            match = re.search(r'["\s]([^\s"]+)\s*$', decoded)
+            if match:
+                folder_name = match.group(1).strip('"')
+                folders.append(folder_name)
         print(f"[email-sync] Папки: {folders}")
     except Exception as e:
         mail.logout()
