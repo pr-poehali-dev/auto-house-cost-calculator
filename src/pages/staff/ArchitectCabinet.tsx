@@ -1616,23 +1616,28 @@ export function ProjectDetail({ project, token, user, onBack, onRefresh }: { pro
             rows={3}
             className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none mb-3 resize-none"
             style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-          <div className="flex gap-2">
-            <button onClick={() => doApprove("approve")}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
-              style={{ background: "rgba(0,255,136,0.2)", color: "#00FF88", border: "1px solid rgba(0,255,136,0.3)" }}>
-              <Icon name="CheckCircle" size={13} /> Согласовать
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => { if (window.confirm("Согласовать расчёт? Проект будет утверждён.")) doApprove("approve"); }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold"
+              style={{ background: "rgba(0,255,136,0.2)", color: "#00FF88", border: "2px solid rgba(0,255,136,0.4)" }}>
+              <Icon name="CheckCircle" size={15} /> Согласовать
             </button>
             <button onClick={() => doApprove("reject")} disabled={!approveComment.trim()}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
-              style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.3)" }}>
-              <Icon name="XCircle" size={13} /> Отклонить
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+              style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24", border: "2px solid rgba(251,191,36,0.3)" }}>
+              <Icon name="RotateCcw" size={15} /> На доработку
             </button>
             <button onClick={() => setShowApprovePanel(false)}
-              className="px-4 py-2 rounded-xl text-sm ml-auto"
+              className="px-4 py-2.5 rounded-xl text-sm ml-auto"
               style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)" }}>
               Отмена
             </button>
           </div>
+          {!approveComment.trim() && (
+            <p className="text-xs mt-2" style={{ color: "rgba(251,191,36,0.6)" }}>
+              <Icon name="Info" size={11} className="inline mr-1" />Для отправки на доработку заполните комментарий выше
+            </p>
+          )}
           {/* История */}
           {reviewHistory.length > 0 && (
             <div className="mt-4 space-y-2">
