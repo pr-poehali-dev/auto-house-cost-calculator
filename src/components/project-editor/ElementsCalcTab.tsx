@@ -571,7 +571,8 @@ function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: st
 
   const push = () => { const n = [...layers, { name: "", thickness: 0.1 }]; setLayers(n); onChange(JSON.stringify(n)); };
   const upd = (i: number, k: "name" | "thickness", v: string | number) => {
-    const n = layers.map((l, j) => j === i ? { ...l, [k]: v } : l);
+    const val = k === "thickness" ? +(+v / 1000).toFixed(4) : v;
+    const n = layers.map((l, j) => j === i ? { ...l, [k]: val } : l);
     setLayers(n); onChange(JSON.stringify(n));
   };
   const del = (i: number) => { const n = layers.filter((_, j) => j !== i); setLayers(n); onChange(JSON.stringify(n)); };
@@ -585,10 +586,12 @@ function WallLayersEditor({ value, onChange }: { value: string; onChange: (v: st
             <div className="w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 font-bold" style={{ background: "rgba(245,158,11,0.2)", color: "#f59e0b" }}>{i+1}</div>
             <input value={l.name} onChange={e => upd(i, "name", e.target.value)}
               placeholder="Материал (напр. Газоблок D400)" className={`flex-1 ${inp}`} style={inpSty} />
-            <div className="relative w-24 flex-shrink-0">
-              <input type="number" value={l.thickness || ""} onChange={e => upd(i, "thickness", +e.target.value)}
-                step="0.01" className={inp} style={{ ...inpSty, paddingRight: "2.2rem" }} />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>м</span>
+            <div className="relative w-28 flex-shrink-0">
+              <input type="number" value={l.thickness ? Math.round(l.thickness * 1000) : ""}
+                onChange={e => upd(i, "thickness", +e.target.value)}
+                step="1" min="1" placeholder="400"
+                className={inp} style={{ ...inpSty, paddingRight: "2.6rem" }} />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>мм</span>
             </div>
             <button onClick={() => del(i)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20" style={{ color: "rgba(255,255,255,0.3)" }}>
               <Icon name="X" size={11} />
