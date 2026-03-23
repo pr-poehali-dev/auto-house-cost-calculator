@@ -137,19 +137,34 @@ def handler(event: dict, context) -> dict:
 
     # ── Email webhook (Яндекс 360 / пересылка) ───────────────────────────────
     if source == "email":
-        # Принимаем письмо: {"from_email": "...", "from_name": "...", "subject": "...", "text": "..."}
         from_email = body.get("from_email") or body.get("email", "")
         from_name = body.get("from_name") or body.get("name") or from_email.split("@")[0] if from_email else "Email клиент"
         subject = body.get("subject", "")
         text = body.get("text", "") or body.get("body", "")
-        # Ищем телефон в тексте письма
-        phone_match = re.search(r"(\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", text + " " + subject)
-        phone = phone_match.group(0) if phone_match else None
-        if phone: phone = re.sub(r"[^\d+]", "", phone)
+        full_text = f"{subject} {text}"
+        phones = list(set(re.sub(r"[^\d+]", "", m.group(0))
+                         for m in re.finditer(r"(\+7|8)[\s\-\(]?\d{3}[\s\-\)]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", full_text)
+                         if len(re.sub(r"[^\d+]", "", m.group(0))) >= 11))
+        phone = phones[0] if phones else None
+        url_re = r"https?://[^\s<>\"\'\)\]\},;]+"
+        url_skip = ["yandex.ru", "mail.ru", "unsubscribe", "click.mail", "passport.yandex", ".png", ".jpg", ".gif"]
+        urls = list(dict.fromkeys(m.group(0).rstrip(".") for m in re.finditer(url_re, full_text)
+                                  if not any(s in m.group(0).lower() for s in url_skip)))[:5]
+        extra_emails = list(set(m.group(0).lower() for m in re.finditer(r"[\w\.\-+]+@[\w\.\-]+\.\w{2,}", full_text)
+                                if m.group(0).lower() != (from_email or "").lower() and "noreply" not in m.group(0).lower()))[:5]
+        comment_parts = [f"От: {from_name} <{from_email}>", f"Тема: {subject}"]
+        if phones:
+            comment_parts.append(f"Телефоны: {', '.join(phones)}")
+        if urls:
+            comment_parts.append(f"Ссылки: {', '.join(urls)}")
+        if extra_emails:
+            comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
+        comment_parts.append(f"\n--- Текст письма ---\n{text[:1500]}")
+        comment = "\n".join(comment_parts)
         lead_id = create_lead(name=from_name[:128], phone=phone, email=from_email,
                               source_id=SOURCE_IDS["email"],
                               source_detail=f"Email: {subject[:100]}" if subject else "Email заявка",
-                              comment=text[:500] if text else "")
+                              comment=comment[:2000])
         notify_bitrix(lead_id, from_name, phone or from_email, "Email")
         return resp({"ok": True, "lead_id": lead_id})
 

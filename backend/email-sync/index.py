@@ -41,35 +41,90 @@ def decode_str(s):
     return " ".join(result)
 
 
+def strip_html(html: str) -> str:
+    """Грубая очистка HTML в текст"""
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
+    text = re.sub(r"</(p|div|tr|li|h\d)>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&quot;", '"', text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
 def get_body(msg) -> str:
-    """Извлекает текст письма"""
-    body = ""
+    """Извлекает текст письма (предпочитает plain text, fallback на HTML)"""
+    plain = ""
+    html = ""
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
             cd = str(part.get("Content-Disposition", ""))
-            if ct == "text/plain" and "attachment" not in cd:
-                charset = part.get_content_charset() or "utf-8"
-                try:
-                    body = part.get_payload(decode=True).decode(charset, errors="ignore")
-                    break
-                except:
-                    pass
+            if "attachment" in cd:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            try:
+                payload = part.get_payload(decode=True).decode(charset, errors="ignore")
+            except:
+                continue
+            if ct == "text/plain" and not plain:
+                plain = payload
+            elif ct == "text/html" and not html:
+                html = payload
     else:
         charset = msg.get_content_charset() or "utf-8"
         try:
-            body = msg.get_payload(decode=True).decode(charset, errors="ignore")
+            payload = msg.get_payload(decode=True).decode(charset, errors="ignore")
         except:
-            pass
-    return body[:2000]
+            payload = ""
+        if msg.get_content_type() == "text/html":
+            html = payload
+        else:
+            plain = payload
+    body = plain or strip_html(html)
+    return body[:3000]
 
 
-def extract_phone(text: str) -> str | None:
-    """Ищет телефон в тексте"""
-    match = re.search(r"(\+7|8)[\s\-\(]?\d{3}[\s\-\)]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", text)
-    if match:
-        return re.sub(r"[^\d+]", "", match.group(0))
-    return None
+def extract_phones(text: str) -> list[str]:
+    """Ищет все телефоны в тексте (российские форматы)"""
+    patterns = [
+        r"(\+7|8)[\s\-\(]?\d{3}[\s\-\)]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+        r"(\+7|8)\s?\(\d{3}\)\s?\d{3}[\-\s]?\d{2}[\-\s]?\d{2}",
+    ]
+    found = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text):
+            clean = re.sub(r"[^\d+]", "", m.group(0))
+            if len(clean) >= 11:
+                found.add(clean)
+    return list(found)
+
+
+def extract_urls(text: str) -> list[str]:
+    """Извлекает URL-ссылки из текста"""
+    url_re = r"https?://[^\s<>\"\'\)\]\},;]+"
+    skip = ["yandex.ru", "mail.ru", "google.com/maps", "unsubscribe", "click.mail",
+            "passport.yandex", "avatars.mds", "mc.yandex", "favicon", ".png", ".jpg", ".gif"]
+    urls = []
+    for m in re.finditer(url_re, text):
+        url = m.group(0).rstrip(".")
+        if not any(s in url.lower() for s in skip):
+            urls.append(url)
+    return list(dict.fromkeys(urls))[:5]
+
+
+def extract_email_addresses(text: str, exclude: str = "") -> list[str]:
+    """Извлекает все email-адреса из текста, кроме exclude"""
+    found = set()
+    for m in re.finditer(r"[\w\.\-+]+@[\w\.\-]+\.\w{2,}", text):
+        addr = m.group(0).lower()
+        if addr != exclude.lower() and "yandex.ru" not in addr and "noreply" not in addr:
+            found.add(addr)
+    return list(found)[:5]
 
 
 def email_lead_exists(conn, from_email: str, subject: str) -> bool:
@@ -95,7 +150,7 @@ def create_lead(conn, name: str, phone: str, email_addr: str,
     lead_id = cur.fetchone()[0]
     cur.execute(
         f"INSERT INTO {S}.crm_events (lead_id, type, content, new_stage) VALUES (%s,'created',%s,'new')",
-        (lead_id, comment[:500]))
+        (lead_id, comment[:2000]))
     conn.commit()
     cur.close()
     return lead_id
@@ -225,9 +280,23 @@ def handler(event: dict, context) -> dict:
                 skipped.append({"email": from_email, "reason": "дубль"})
                 continue
 
-            phone = extract_phone(body) or extract_phone(subject)
+            full_text = f"{subject} {body}"
+            phones = extract_phones(full_text)
+            phone = phones[0] if phones else None
+            urls = extract_urls(full_text)
+            extra_emails = extract_email_addresses(full_text, exclude=from_email)
+
             source_detail = f"Email: {subject[:80]}" if subject else "Входящее письмо"
-            comment = f"От: {from_email}\nТема: {subject}\n\n{body[:400]}"
+
+            comment_parts = [f"От: {from_name} <{from_email}>", f"Тема: {subject}"]
+            if phones:
+                comment_parts.append(f"Телефоны: {', '.join(phones)}")
+            if urls:
+                comment_parts.append(f"Ссылки: {', '.join(urls)}")
+            if extra_emails:
+                comment_parts.append(f"Доп. email: {', '.join(extra_emails)}")
+            comment_parts.append(f"\n--- Текст письма ---\n{body[:1500]}")
+            comment = "\n".join(comment_parts)
 
             lead_id = create_lead(
                 conn=conn,
@@ -237,7 +306,8 @@ def handler(event: dict, context) -> dict:
                 source_detail=source_detail,
                 comment=comment,
             )
-            created.append({"lead_id": lead_id, "from": from_email, "subject": subject})
+            created.append({"lead_id": lead_id, "from": from_email, "subject": subject,
+                            "phone": phone, "urls": urls})
             print(f"[email-sync] Создан лид #{lead_id} — {from_name} <{from_email}>")
 
             notify_bitrix(lead_id, from_name, source_detail)

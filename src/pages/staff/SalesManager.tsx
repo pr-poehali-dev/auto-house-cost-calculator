@@ -1576,6 +1576,29 @@ const SCRIPT_STEPS = [
   { step: 5, title: "Закрытие", color: "#00FF88", text: "«Отправлю планировку и расчёт в 3 комплектациях. Когда удобнее встретиться: в субботу в 12:00 или в понедельник в 18:00?»" },
 ];
 
+function linkifyText(text: string) {
+  if (!text) return null;
+  const parts: (string | React.ReactElement)[] = [];
+  const re = /(https?:\/\/[^\s<>"')\]},;]+)|(\+7[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d|8[\s\-(]*9[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d[\s\-()]*\d)|([\w.+]+@[\w.]+\.\w{2,})/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let idx = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    if (m[1]) {
+      parts.push(<a key={idx++} href={m[1]} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#00D4FF" }}>{m[1]}</a>);
+    } else if (m[2]) {
+      const clean = m[2].replace(/[^\d+]/g, "");
+      parts.push(<a key={idx++} href={`tel:${clean}`} className="underline" style={{ color: "#00FF88" }}>{m[2]}</a>);
+    } else if (m[3]) {
+      parts.push(<a key={idx++} href={`mailto:${m[3]}`} className="underline" style={{ color: "#FBBF24" }}>{m[3]}</a>);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 // ─── CRM Lead Card ────────────────────────────────────────────────────────────
 function CrmLeadCard({ lead, onClick }: { lead: Lead; onClick: () => void }) {
   const stage = CRM_STAGES.find(s => s.id === lead.stage) || CRM_STAGES[0];
@@ -1588,9 +1611,9 @@ function CrmLeadCard({ lead, onClick }: { lead: Lead; onClick: () => void }) {
         {lead.budget && <span className="text-xs font-mono flex-shrink-0" style={{ color: "#FBBF24" }}>{fmt(lead.budget)} ₽</span>}
       </div>
       {lead.phone && (
-        <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: "rgba(255,255,255,0.5)" }}>
+        <a href={`tel:${lead.phone}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 text-xs mb-1.5 hover:underline" style={{ color: "#00FF88" }}>
           <Icon name="Phone" size={10} />{lead.phone}
-        </div>
+        </a>
       )}
       <div className="flex items-center gap-1.5 flex-wrap">
         {lead.source_name && (
@@ -1718,18 +1741,33 @@ function CrmLeadModal({ lead, token, sources, onClose, onUpdated }: {
           {tab === "info" && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                {[["name","Имя","text"],["phone","Телефон","tel"],["email","Email","email"]].map(([k,l,t]) => (
-                  <div key={k} className={k === "name" ? "col-span-2" : ""}>
-                    <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
-                    {editMode ? (
-                      <input type={t} defaultValue={(fullLead as Record<string,unknown>)[k] as string || ""}
-                        onChange={e => setBuf(b => ({ ...b, [k]: e.target.value }))}
-                        className={inp} style={inpS} />
-                    ) : (
-                      <div className="text-sm text-white px-1">{(fullLead as Record<string,unknown>)[k] as string || <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}</div>
-                    )}
-                  </div>
-                ))}
+                {[["name","Имя","text"],["phone","Телефон","tel"],["email","Email","email"]].map(([k,l,t]) => {
+                  const val = (fullLead as Record<string,unknown>)[k] as string || "";
+                  return (
+                    <div key={k} className={k === "name" ? "col-span-2" : ""}>
+                      <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{l}</label>
+                      {editMode ? (
+                        <input type={t} defaultValue={val}
+                          onChange={e => setBuf(b => ({ ...b, [k]: e.target.value }))}
+                          className={inp} style={inpS} />
+                      ) : val ? (
+                        k === "phone" ? (
+                          <a href={`tel:${val}`} className="text-sm px-1 flex items-center gap-1.5 hover:underline" style={{ color: "#00FF88" }}>
+                            <Icon name="Phone" size={12} />{val}
+                          </a>
+                        ) : k === "email" ? (
+                          <a href={`mailto:${val}`} className="text-sm px-1 flex items-center gap-1.5 hover:underline" style={{ color: "#FBBF24" }}>
+                            <Icon name="Mail" size={12} />{val}
+                          </a>
+                        ) : (
+                          <div className="text-sm text-white px-1">{val}</div>
+                        )
+                      ) : (
+                        <div className="text-sm px-1"><span style={{ color: "rgba(255,255,255,0.25)" }}>—</span></div>
+                      )}
+                    </div>
+                  );
+                })}
                 <div>
                   <label className="block text-xs mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>Источник</label>
                   {editMode ? (
@@ -1926,7 +1964,7 @@ function CrmLeadModal({ lead, token, sources, onClose, onUpdated }: {
                        <Icon name="MessageSquare" size={12} style={{ color: "#00D4FF" }} />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div style={{ color: "rgba(255,255,255,0.7)" }}>{e.content}</div>
+                      <div style={{ color: "rgba(255,255,255,0.7)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{linkifyText(e.content)}</div>
                       <div className="mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
                         {e.by} · {new Date(e.created_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
                       </div>
