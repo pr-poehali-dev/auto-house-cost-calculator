@@ -151,26 +151,48 @@ def handler(event: dict, context) -> dict:
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(yandex_email, yandex_password)
-        mail.select("INBOX")
     except Exception as e:
         print(f"[email-sync] Ошибка подключения IMAP: {e}")
         return resp({"error": f"Ошибка подключения к почте: {e}"}, 500)
 
-    # Получаем непрочитанные письма
+    # Получаем список всех папок
     try:
-        _, msg_ids = mail.search(None, "UNSEEN")
-        email_ids = msg_ids[0].split()
-        print(f"[email-sync] Непрочитанных писем: {len(email_ids)}")
+        _, folders_raw = mail.list()
+        folders = []
+        for f in folders_raw:
+            parts = f.decode().split('"/"')
+            folder_name = parts[-1].strip().strip('"')
+            folders.append(folder_name)
+        print(f"[email-sync] Папки: {folders}")
     except Exception as e:
         mail.logout()
-        return resp({"error": f"Ошибка поиска писем: {e}"}, 500)
+        return resp({"error": f"Ошибка получения папок: {e}"}, 500)
 
     conn = db()
     created = []
     skipped = []
+    all_email_ids = []
 
-    for eid in email_ids[-20:]:  # максимум 20 последних
+    # Собираем непрочитанные из всех папок
+    for folder in folders:
         try:
+            status, _ = mail.select(folder)
+            if status != "OK":
+                continue
+            _, msg_ids = mail.search(None, "UNSEEN")
+            ids = msg_ids[0].split()
+            if ids:
+                print(f"[email-sync] Папка '{folder}': {len(ids)} непрочитанных")
+                all_email_ids.extend([(folder, eid) for eid in ids])
+        except Exception as e:
+            print(f"[email-sync] Ошибка папки '{folder}': {e}")
+            continue
+
+    print(f"[email-sync] Всего непрочитанных: {len(all_email_ids)}")
+
+    for folder, eid in all_email_ids[-20:]:  # максимум 20 последних
+        try:
+            mail.select(folder)
             _, msg_data = mail.fetch(eid, "(RFC822)")
             msg = email.message_from_bytes(msg_data[0][1])
 
