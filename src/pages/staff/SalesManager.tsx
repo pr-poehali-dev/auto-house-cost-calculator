@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 const ORDER_URL = "https://functions.poehali.dev/5cd1eb69-9a08-4572-ae2a-bc11e49da506";
 const COMPANY_URL = "https://functions.poehali.dev/0796a927-18d1-46be-bd26-3bbcfe93738d";
 const SUPPLIER_API = "https://functions.poehali.dev/0864e1a5-8fce-4370-a525-80d6700b50ee";
+const PROJECTS_URL = "https://functions.poehali.dev/08f0cecd-b702-442e-8c9d-69c921c1b68e";
 
 interface SalesManagerProps {
   user: { id: number; full_name: string; role_code: string };
@@ -111,6 +112,24 @@ interface RfqBrief {
   proposals_count: number;
   deadline: string | null;
   created_at: string;
+}
+
+interface ReviewProject {
+  id: number;
+  name: string;
+  type: string;
+  area: number;
+  floors: number;
+  rooms: number;
+  price: number;
+  calc_status: string;
+  assigned_reviewer: number;
+  reviewer_name?: string;
+  submitted_by?: number;
+  submitted_at?: string;
+  review_comment?: string;
+  has_calc?: boolean;
+  files?: { file_type: string; file_url: string }[];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -2240,12 +2259,241 @@ function CrmKanban({ user, token }: { user: { id: number; full_name: string; rol
   );
 }
 
+// ─── Approval Tab ────────────────────────────────────────────────────────────
+
+function ApprovalTab({ user, token }: { user: SalesManagerProps["user"]; token: string }) {
+  const [projects, setProjects] = useState<ReviewProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [comment, setComment] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const loadProjects = useCallback(() => {
+    setLoading(true);
+    apiFetch(`${PROJECTS_URL}?action=list`, {}, token).then((r) => {
+      setProjects(r.projects || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [token]);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  const pending = projects.filter(
+    (p) => p.calc_status === "submitted" && p.assigned_reviewer === user.id
+  );
+  const reviewed = projects.filter(
+    (p) => (p.calc_status === "approved" || p.calc_status === "rejected") && p.assigned_reviewer === user.id
+  );
+
+  const handleAction = (projectId: number, action: "approve" | "reject") => {
+    if (action === "reject" && !comment.trim()) return;
+    setActionLoading(true);
+    apiFetch(`${PROJECTS_URL}?action=${action}`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, comment: comment.trim() }),
+    }, token).then(() => {
+      setActionLoading(false);
+      setExpandedId(null);
+      setComment("");
+      loadProjects();
+    }).catch(() => setActionLoading(false));
+  };
+
+  const statusColor = (s: string) =>
+    s === "submitted" ? "#00D4FF" : s === "approved" ? "#00FF88" : s === "rejected" ? "#EF4444" : "rgba(255,255,255,0.4)";
+
+  const statusLabel = (s: string) =>
+    s === "submitted" ? "На согласовании" : s === "approved" ? "Согласован" : s === "rejected" ? "Отклонён" : s;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Icon name="Loader2" size={32} className="animate-spin" style={{ color: "#FBBF24" }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Pending reviews */}
+      <div>
+        <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+          <Icon name="Clock" size={18} style={{ color: "#00D4FF" }} />
+          Ожидают согласования
+          {pending.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "rgba(0,212,255,0.15)", color: "#00D4FF" }}>
+              {pending.length}
+            </span>
+          )}
+        </h3>
+
+        {pending.length === 0 ? (
+          <div className="rounded-2xl p-12 flex flex-col items-center gap-3" style={CARD_S}>
+            <Icon name="CheckCircle2" size={40} style={{ color: "rgba(255,255,255,0.1)" }} />
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+              Нет проектов, ожидающих согласования
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pending.map((p) => (
+              <div key={p.id} className="rounded-2xl p-4 transition-all" style={CARD_S}>
+                <div
+                  className="flex items-start justify-between cursor-pointer"
+                  onClick={() => { setExpandedId(expandedId === p.id ? null : p.id); setComment(""); }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-white font-semibold text-sm truncate">{p.name}</span>
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+                        style={{ background: `${statusColor(p.calc_status)}20`, color: statusColor(p.calc_status) }}
+                      >
+                        {statusLabel(p.calc_status)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+                      {p.type && <span><Icon name="Home" size={11} className="inline mr-1" />{p.type}</span>}
+                      {p.area > 0 && <span><Icon name="Maximize2" size={11} className="inline mr-1" />{p.area} м²</span>}
+                      {p.floors > 0 && <span><Icon name="Layers" size={11} className="inline mr-1" />{p.floors} эт.</span>}
+                      {p.rooms > 0 && <span><Icon name="DoorOpen" size={11} className="inline mr-1" />{p.rooms} комн.</span>}
+                      {p.price > 0 && (
+                        <span className="font-semibold" style={{ color: "#FBBF24" }}>
+                          <Icon name="Banknote" size={11} className="inline mr-1" />{fmt(p.price)} ₽
+                        </span>
+                      )}
+                    </div>
+                    {p.submitted_at && (
+                      <p className="text-xs mt-1.5" style={{ color: "rgba(255,255,255,0.3)" }}>
+                        Отправлено: {relativeTime(p.submitted_at)}
+                      </p>
+                    )}
+                  </div>
+                  <Icon
+                    name={expandedId === p.id ? "ChevronUp" : "ChevronDown"}
+                    size={16}
+                    style={{ color: "rgba(255,255,255,0.3)" }}
+                    className="shrink-0 mt-1"
+                  />
+                </div>
+
+                {expandedId === p.id && (
+                  <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                    {/* Files */}
+                    {p.files && p.files.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs font-medium mb-2" style={{ color: "rgba(255,255,255,0.4)" }}>Файлы проекта:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {p.files.map((f, i) => (
+                            <a
+                              key={i}
+                              href={f.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                              style={{ background: "rgba(255,255,255,0.06)", color: "#00D4FF" }}
+                            >
+                              <Icon name="FileDown" size={12} />
+                              {f.file_type}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Comment */}
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium mb-1.5" style={LBL_S}>
+                        Комментарий {<span style={{ color: "rgba(255,255,255,0.25)" }}>(обязателен при отклонении)</span>}
+                      </label>
+                      <textarea
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        placeholder="Ваш комментарий..."
+                        rows={3}
+                        className={INP}
+                        style={INP_S}
+                        onFocus={focusOn as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
+                        onBlur={blurOn as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
+                      />
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleAction(p.id, "approve")}
+                        disabled={actionLoading}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                        style={{ background: "#00FF88", color: "#0a0d14" }}
+                      >
+                        <Icon name={actionLoading ? "Loader2" : "Check"} size={14} className={actionLoading ? "animate-spin" : ""} />
+                        Согласовать
+                      </button>
+                      <button
+                        onClick={() => handleAction(p.id, "reject")}
+                        disabled={actionLoading || !comment.trim()}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                        style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.3)" }}
+                      >
+                        <Icon name={actionLoading ? "Loader2" : "X"} size={14} className={actionLoading ? "animate-spin" : ""} />
+                        Отклонить
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recently reviewed */}
+      {reviewed.length > 0 && (
+        <div>
+          <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+            <Icon name="History" size={18} style={{ color: "rgba(255,255,255,0.4)" }} />
+            Недавно рассмотренные
+          </h3>
+          <div className="space-y-2">
+            {reviewed.map((p) => (
+              <div key={p.id} className="rounded-xl p-3 flex items-center justify-between" style={CARD_S}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-white text-sm font-medium truncate">{p.name}</span>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+                      style={{ background: `${statusColor(p.calc_status)}20`, color: statusColor(p.calc_status) }}
+                    >
+                      {statusLabel(p.calc_status)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    {p.type && <span>{p.type}</span>}
+                    {p.area > 0 && <span>{p.area} м²</span>}
+                    {p.price > 0 && <span>{fmt(p.price)} ₽</span>}
+                  </div>
+                  {p.review_comment && (
+                    <p className="text-xs mt-1 italic" style={{ color: "rgba(255,255,255,0.3)" }}>
+                      "{p.review_comment}"
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main SalesManager ────────────────────────────────────────────────────────
 
 export default function SalesManager({ user, token }: SalesManagerProps) {
-  const [mainTab, setMainTab] = useState<"crm" | "orders">("crm");
+  const [mainTab, setMainTab] = useState<"crm" | "orders" | "approvals">("crm");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
   const [view, setView] = useState<"list" | "detail">("list");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("all");
@@ -2260,6 +2508,14 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
   }, [token]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  // Load pending approval count
+  useEffect(() => {
+    apiFetch(`${PROJECTS_URL}?action=list`, {}, token).then((r) => {
+      const all: ReviewProject[] = r.projects || [];
+      setPendingCount(all.filter((p) => p.calc_status === "submitted" && p.assigned_reviewer === user.id).length);
+    }).catch(() => {});
+  }, [token, user.id]);
 
   const openOrder = (id: number) => {
     setSelectedId(id);
@@ -2290,6 +2546,38 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
     );
   }
 
+  // Согласование — вкладка
+  if (mainTab === "approvals") {
+    return (
+      <div>
+        <div className="flex gap-2 mb-5">
+          <button onClick={() => setMainTab("crm")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="Kanban" size={14} /> Воронка CRM
+          </button>
+          <button onClick={() => setMainTab("orders")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="ClipboardList" size={14} /> Заказы
+          </button>
+          <button onClick={() => setMainTab("approvals")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
+            <Icon name="ClipboardCheck" size={14} /> Согласование
+            {pendingCount > 0 && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-xs font-bold"
+                style={{ background: "var(--neon-orange)", color: "#0a0d14", fontSize: "10px" }}>
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
+        <ApprovalTab user={user} token={token} />
+      </div>
+    );
+  }
+
   // Новая CRM воронка — основная вкладка
   if (mainTab === "crm") {
     return (
@@ -2304,6 +2592,17 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
             style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
             <Icon name="ClipboardList" size={14} /> Заказы
+          </button>
+          <button onClick={() => setMainTab("approvals")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+            <Icon name="ClipboardCheck" size={14} /> Согласование
+            {pendingCount > 0 && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-xs font-bold"
+                style={{ background: "var(--neon-orange)", color: "#0a0d14", fontSize: "10px" }}>
+                {pendingCount}
+              </span>
+            )}
           </button>
         </div>
         <CrmKanban user={user} token={token} />
@@ -2324,6 +2623,17 @@ export default function SalesManager({ user, token }: SalesManagerProps) {
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
           style={{ background: "rgba(255,107,26,0.15)", color: "var(--neon-orange)", border: "1px solid rgba(255,107,26,0.3)" }}>
           <Icon name="ClipboardList" size={14} /> Заказы
+        </button>
+        <button onClick={() => setMainTab("approvals")}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+          style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+          <Icon name="ClipboardCheck" size={14} /> Согласование
+          {pendingCount > 0 && (
+            <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-xs font-bold"
+              style={{ background: "var(--neon-orange)", color: "#0a0d14", fontSize: "10px" }}>
+              {pendingCount}
+            </span>
+          )}
         </button>
       </div>
       {/* Header */}
