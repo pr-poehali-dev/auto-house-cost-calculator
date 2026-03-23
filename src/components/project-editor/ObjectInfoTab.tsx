@@ -351,7 +351,6 @@ function RoomsExplication({ rooms, onChange }: { rooms: Room[]; onChange: (r: Ro
                       autoFocus
                       value={room.name}
                       onChange={e => updateRoom(room.id, { name: e.target.value })}
-                      onBlur={() => setEditingId(null)}
                       className={`flex-1 ${inp}`}
                       style={inpSty}
                       placeholder="Наименование помещения"
@@ -373,6 +372,9 @@ function RoomsExplication({ rooms, onChange }: { rooms: Room[]; onChange: (r: Ro
                       style={inpSty}
                       placeholder="Эт."
                     />
+                    <button onClick={() => setEditingId(null)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors" style={{ color: "rgba(255,255,255,0.3)" }}>
+                      <Icon name="Check" size={12} />
+                    </button>
                   </>
                 ) : (
                   <>
