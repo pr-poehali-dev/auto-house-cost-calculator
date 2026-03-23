@@ -1,14 +1,12 @@
 """
-supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент
+supply-ops: генерация счёта PDF + операции по предложениям поставщиков + AI-ассистент (LM Studio)
 """
 import json, os, io, base64, uuid, ssl, re, urllib.request, urllib.parse, urllib.error, time
 import psycopg2
 from datetime import datetime
 
 S = "t_p78845984_auto_house_cost_calc"
-
-# Кэш токена GigaChat — живёт 25 минут (токен действует 30 мин)
-_gc_token_cache = {"token": "", "expires_at": 0.0}
+LM_PROXY_URL = "https://functions.poehali.dev/74ffb742-4148-4545-b5bc-953fbc29c1ea"
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -85,74 +83,32 @@ SYSTEM_PROMPTS = {
 - Отвечаешь на вопросы о работе портала""",
 }
 
-def gigachat_token() -> str:
-    global _gc_token_cache
-    now = time.time()
-    if _gc_token_cache["token"] and _gc_token_cache["expires_at"] > now:
-        return _gc_token_cache["token"]
-    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
-    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
+def lm_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
+    payload = {"messages": messages, "temperature": temperature}
     req = urllib.request.Request(
-        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-        data=data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"Basic {auth_key}",
-            "RqUID": str(uuid.uuid4()),
-        },
-        method="POST"
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
-        token = json.loads(r.read())["access_token"]
-    _gc_token_cache["token"] = token
-    _gc_token_cache["expires_at"] = now + 1500  # 25 минут
-    return token
-
-def gigachat_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
-    token = gigachat_token()
-    payload = {"model": "GigaChat", "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
-    req = urllib.request.Request(
-        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        f"{LM_PROXY_URL}?action=chat",
         data=json.dumps(payload, ensure_ascii=False).encode(),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         method="POST"
     )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=50, context=ctx) as r:
+    with urllib.request.urlopen(req, timeout=120) as r:
         result = json.loads(r.read().decode())
-    return result["choices"][0]["message"]["content"].strip()
+    if not result.get("ok"):
+        raise Exception(result.get("error", "LM Studio error"))
+    return result["reply"].strip()
 
 def get_openai_response(messages: list, role: str) -> str:
-    if not os.environ.get("GIGACHAT_AUTH_KEY"):
-        return "AI-ассистент временно недоступен."
     system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["visitor"])
     try:
-        token = gigachat_token()
-        payload = {
-            "model": "GigaChat",
-            "messages": [{"role": "system", "content": system_prompt}] + messages,
-            "max_tokens": 700,
-            "temperature": 0.7,
-        }
-        req = urllib.request.Request(
-            "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode(),
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            method="POST"
+        return lm_complete(
+            [{"role": "system", "content": system_prompt}] + messages,
+            max_tokens=700, temperature=0.7
         )
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=50, context=ctx) as r:
-            result = json.loads(r.read().decode())
-        return result["choices"][0]["message"]["content"]
     except Exception as e:
         return f"Ошибка соединения с AI: {str(e)}"
+
+def gigachat_complete(messages: list, max_tokens: int = 800, temperature: float = 0.7) -> str:
+    return lm_complete(messages, max_tokens, temperature)
 
 def db(): return psycopg2.connect(os.environ["DATABASE_URL"])
 def resp(data, code=200):
@@ -339,9 +295,6 @@ def handler(event, context):
         if not project:
             return resp({"error": "project обязателен"}, 400)
 
-        if not os.environ.get("GIGACHAT_AUTH_KEY"):
-            return resp({"error": "GIGACHAT_AUTH_KEY не настроен"}, 500)
-
         has_desc = bool(project.get("description", "").strip())
         has_features = bool(project.get("features", "").strip())
         has_renders = project.get("renders_count", 0) > 0
@@ -388,9 +341,6 @@ def handler(event, context):
         prefs = body.get("preferences", {})
         if not prefs:
             return resp({"error": "preferences обязательны"}, 400)
-
-        if not os.environ.get("GIGACHAT_AUTH_KEY"):
-            return resp({"error": "GIGACHAT_AUTH_KEY не настроен"}, 500)
 
         desc_prompt = f"""Создай профессиональное описание проекта частного дома.
 

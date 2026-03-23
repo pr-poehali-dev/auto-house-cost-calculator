@@ -123,10 +123,10 @@ export default function AiAssistant({ roleCode, token, context }: Props) {
 
       {/* Панель чата */}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end sm:justify-end pointer-events-none">
+        <div className="fixed inset-0 z-50 flex items-end justify-end pointer-events-none" style={{ paddingBottom: 0 }}>
           <div
-            className="pointer-events-auto flex flex-col w-full sm:w-[420px] h-[100dvh] sm:h-[600px] sm:m-4 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden"
-            style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.1)" }}
+            className="pointer-events-auto flex flex-col w-full sm:w-[420px] shadow-2xl overflow-hidden"
+            style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.1)", height: "min(600px, 100dvh)", borderRadius: "16px 16px 0 0", margin: "0 16px" }}
           >
             {/* Хедер */}
             <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
