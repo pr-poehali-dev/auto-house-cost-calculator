@@ -1261,6 +1261,7 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
   const [calcSaving, setCalcSaving] = useState(false);
   const [calcSavedAt, setCalcSavedAt] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<PlacedElement[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Лайтбокс для просмотра изображений
@@ -1364,15 +1365,30 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
 
   const handlePlacedChange = (els: PlacedElement[]) => {
     setPlacedElements(els);
+    pendingSaveRef.current = els;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      pendingSaveRef.current = null;
       saveCalc(els);
       apiFetch(`${PROJECTS_URL}?action=update_has_calc`, {
         method: "POST",
         body: JSON.stringify({ project_id: project.id, has_calc: els.length > 0 }),
       }, token);
-    }, 2000);
+    }, 800);
   };
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (pendingSaveRef.current !== null) {
+        const els = pendingSaveRef.current;
+        apiFetch(`${PROJECTS_URL}?action=calc_save`, {
+          method: "POST",
+          body: JSON.stringify({ project_id: project.id, elements: els }),
+        }, token);
+      }
+    };
+  }, [project.id, token]);
 
   useEffect(() => { if (tab === "files") loadProject(); }, [tab, loadProject]);
 
