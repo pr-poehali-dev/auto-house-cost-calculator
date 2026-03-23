@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 
-const CHAT_URL = "https://functions.poehali.dev/5ff3656c-36ff-46d2-9635-eda6c94ca859";
+const LM_URL = "https://functions.poehali.dev/74ffb742-4148-4545-b5bc-953fbc29c1ea";
 
 export type ChatRole = "visitor" | "architect" | "constructor" | "supply" | "engineer" | "lawyer" | "supplier";
 
@@ -113,13 +113,16 @@ export default function ChatWidget({ role = "visitor", userName }: ChatWidgetPro
       .map(m => ({ role: m.role, content: m.content }));
 
     try {
-      const res = await fetch(`${CHAT_URL}?action=chat`, {
+      const promptRes = await fetch(`${LM_URL}?action=get_prompt&role_code=${role}`).then(r => r.json());
+      const systemPrompt = promptRes.system_prompt || "";
+
+      const res = await fetch(`${LM_URL}?action=chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, role }),
+        body: JSON.stringify({ messages: history, system_prompt: systemPrompt }),
       }).then(r => r.json());
 
-      const reply = res.reply || "Произошла ошибка. Попробуйте ещё раз.";
+      const reply = (res.ok && res.reply) ? res.reply : (res.error || "Произошла ошибка. Попробуйте ещё раз.");
       setMessages(prev => [...prev, { role: "assistant", content: reply, ts: Date.now() }]);
       if (!open) setUnread(n => n + 1);
     } catch {
