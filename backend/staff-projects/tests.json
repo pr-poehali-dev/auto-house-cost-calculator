@@ -31,6 +31,12 @@
       "method": "POST",
       "path": "/?action=lock",
       "expectedStatus": 401
+    },
+    {
+      "name": "load_object_info without token",
+      "method": "GET",
+      "path": "/?action=load_object_info&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }

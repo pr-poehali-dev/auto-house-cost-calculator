@@ -1333,6 +1333,14 @@ function ProjectDetail({ project, token, user, onBack, onRefresh }: { project: P
     }
   };
 
+  // Загружаем информацию об объекте при открытии проекта
+  useEffect(() => {
+    apiFetch(`${PROJECTS_URL}?action=load_object_info&project_id=${project.id}`, {}, token).then(r => {
+      if (r.info) setObjectInfo(r.info);
+      else setObjectInfo(EMPTY_INFO);
+    });
+  }, [project.id, token]);
+
   // Загружаем сохранённые элементы расчёта при открытии проекта
   useEffect(() => {
     apiFetch(`${PROJECTS_URL}?action=calc_load&project_id=${project.id}`, {}, token).then(r => {

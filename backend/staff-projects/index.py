@@ -1131,5 +1131,36 @@ def handler(event: dict, context) -> dict:
             return resp({"elements": [], "updated_at": None})
         return resp({"elements": json.loads(row[0]), "updated_at": str(row[1])})
 
+    # ── Информация об объекте — сохранить ─────────────────────────────────────
+    if action == "save_object_info":
+        pid = body.get("project_id")
+        info = body.get("info", {})
+        if not pid: conn.close(); return resp({"error": "project_id обязателен"}, 400)
+        info_str = json.dumps(info, ensure_ascii=False)
+        cur = conn.cursor()
+        cur.execute(
+            f"""INSERT INTO {S}.project_object_info (project_id, info_json, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (project_id) DO UPDATE
+                SET info_json = EXCLUDED.info_json, updated_at = NOW()""",
+            (pid, info_str)
+        )
+        conn.commit(); cur.close(); conn.close()
+        return resp({"ok": True})
+
+    # ── Информация об объекте — загрузить ─────────────────────────────────────
+    if action == "load_object_info":
+        pid = body.get("project_id") or qs.get("project_id")
+        if not pid: conn.close(); return resp({"error": "project_id обязателен"}, 400)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT info_json FROM {S}.project_object_info WHERE project_id=%s",
+            (pid,)
+        )
+        row = cur.fetchone(); cur.close(); conn.close()
+        if not row:
+            return resp({"info": None})
+        return resp({"info": json.loads(row[0])})
+
     conn.close()
     return resp({"error":"Not found"}, 404)
