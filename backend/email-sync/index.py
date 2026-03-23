@@ -4,6 +4,7 @@
 """
 import json, os, re, imaplib, email
 from email.header import decode_header
+from datetime import datetime, timedelta
 import psycopg2
 
 S = "t_p78845984_auto_house_cost_calc"
@@ -132,7 +133,7 @@ def notify_bitrix(lead_id: int, name: str, source_detail: str):
 
 
 def handler(event: dict, context) -> dict:
-    """Читает непрочитанные письма с Яндекс почты и создаёт лиды в CRM"""
+    """Читает письма с Яндекс почты за последние 7 дней и создаёт лиды в CRM"""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -173,16 +174,17 @@ def handler(event: dict, context) -> dict:
     skipped = []
     all_email_ids = []
 
-    # Собираем непрочитанные из всех папок
+    # Ищем письма за последние 7 дней во всех папках
+    since_date = (datetime.now() - timedelta(days=7)).strftime("%d-%b-%Y")
     for folder in folders:
         try:
             status, _ = mail.select(folder)
             if status != "OK":
                 continue
-            _, msg_ids = mail.search(None, "UNSEEN")
+            _, msg_ids = mail.search(None, f'SINCE "{since_date}"')
             ids = msg_ids[0].split()
             if ids:
-                print(f"[email-sync] Папка '{folder}': {len(ids)} непрочитанных")
+                print(f"[email-sync] Папка '{folder}': {len(ids)} писем за неделю")
                 all_email_ids.extend([(folder, eid) for eid in ids])
         except Exception as e:
             print(f"[email-sync] Ошибка папки '{folder}': {e}")
