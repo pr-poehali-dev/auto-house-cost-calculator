@@ -102,43 +102,24 @@ CLASSIFY_PROMPT = """Ты — эксперт проектной документ
 Верни ТОЛЬКО JSON:
 {"category": "...", "summary": "..."}"""
 
-def gigachat_token() -> str:
-    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
-    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
-    req = urllib.request.Request(
-        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-        data=data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"Basic {auth_key}",
-            "RqUID": str(uuid.uuid4()),
-        },
-        method="POST"
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
-        return json.loads(r.read())["access_token"]
+LM_URL = "http://87.117.11.177:4321"
+LM_MODEL = "gemma-3-4b-it"
 
 def gigachat_chat(messages: list, temperature: float = 0.1, max_tokens: int = 2000) -> str:
-    token = gigachat_token()
     data = json.dumps({
-        "model": "GigaChat",
+        "model": LM_MODEL,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "stream": False,
     }, ensure_ascii=False).encode()
     req = urllib.request.Request(
-        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        f"{LM_URL}/v1/chat/completions",
         data=data,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        headers={"Content-Type": "application/json"},
         method="POST"
     )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+    with urllib.request.urlopen(req, timeout=120) as r:
         result = json.loads(r.read())
     return result["choices"][0]["message"]["content"].strip()
 
