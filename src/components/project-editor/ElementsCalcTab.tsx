@@ -1267,6 +1267,95 @@ function FullVorTable({ rows, onPriceChange, token }: {
   const inp = "w-full px-2 py-1 rounded-lg text-xs text-right text-white outline-none font-mono";
   const inpSty = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" };
 
+  const printEstimate = () => {
+    const date = new Date().toLocaleDateString("ru-RU");
+    const secs = [...new Set(rows.map(r => r.section))];
+    const sectionRows = secs.map(sec => {
+      const secRows = rows.filter(r => r.section === sec);
+      const secMat = secRows.filter(r => !r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+      const secWork = secRows.filter(r => r.is_work).reduce((s, r) => s + r.qty * (r.price_per_unit || 0), 0);
+      const secTotal = secMat + secWork;
+      return `
+        <tr class="section-header"><td colspan="5">${sec}</td></tr>
+        ${secRows.map((r, idx) => `
+          <tr class="${idx % 2 ? 'row-even' : ''}">
+            <td>${r.name}</td>
+            <td class="center">${r.is_work ? 'Работа' : 'Материал'}</td>
+            <td class="center">${r.unit}</td>
+            <td class="right">${r.qty % 1 === 0 ? r.qty : r.qty.toFixed(2)}</td>
+            <td class="right">${r.price_per_unit ? fmt(r.qty * (r.price_per_unit || 0)) : '—'}</td>
+          </tr>
+        `).join('')}
+        ${secTotal > 0 ? `<tr class="section-total"><td colspan="3" class="right">Итого по разделу:</td><td></td><td class="right bold">${fmt(secTotal)}</td></tr>` : ''}
+      `;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Смета — Расчёт по элементам</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm 10mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; }
+  .header { margin-bottom: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+  .header h1 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .header .meta { font-size: 11px; color: #555; }
+  .header .meta span { margin-right: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f0f0f0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+       padding: 6px 8px; border: 1px solid #ccc; text-align: left; font-weight: 700; }
+  td { padding: 5px 8px; border: 1px solid #ddd; font-size: 11px; vertical-align: top; }
+  .section-header td { background: #e8e8e8; font-weight: 700; padding: 6px 8px; }
+  .section-total td { background: #f5f5f5; border-top: 2px solid #bbb; }
+  .row-even td { background: #fafafa; }
+  .center { text-align: center; }
+  .right { text-align: right; }
+  .bold { font-weight: 700; }
+  .totals { margin-top: 14px; padding: 10px 14px; border-top: 3px solid #333; text-align: right; }
+  .totals div { margin-bottom: 4px; font-size: 12px; }
+  .totals .grand { font-size: 16px; font-weight: 700; margin-top: 6px; }
+  .signatures { margin-top: 40px; display: flex; gap: 60px; }
+  .sig-block { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: 10px; color: #555; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head><body>
+<div class="header">
+  <h1>СМЕТА — ВЕДОМОСТЬ ОБЪЁМОВ РАБОТ</h1>
+  <div class="meta">
+    <span>Позиций: <b>${rows.length}</b></span>
+    <span>Материалов: <b>${rows.filter(r => !r.is_work).length}</b></span>
+    <span>Работ: <b>${rows.filter(r => r.is_work).length}</b></span>
+    <span>Дата: <b>${date}</b></span>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:40%">Наименование</th>
+      <th style="width:10%" class="center">Тип</th>
+      <th style="width:8%" class="center">Ед. изм.</th>
+      <th style="width:12%" class="right">Кол-во</th>
+      <th style="width:15%" class="right">Сумма, ₽</th>
+    </tr>
+  </thead>
+  <tbody>${sectionRows}</tbody>
+</table>
+<div class="totals">
+  ${totalMat > 0 ? `<div>Итого материалы: <b>${fmt(totalMat)} ₽</b></div>` : ''}
+  ${totalWork > 0 ? `<div>Итого работы: <b>${fmt(totalWork)} ₽</b></div>` : ''}
+  <div class="grand">ИТОГО ПО СМЕТЕ: ${hasPrices ? fmt(totalAll) + ' ₽' : 'цены не введены'}</div>
+</div>
+<div class="signatures">
+  <div class="sig-block">Составил (архитектор): _______________</div>
+  <div class="sig-block">Проверил: _______________</div>
+  <div class="sig-block">Утвердил: _______________</div>
+</div>
+<script>window.onload=function(){window.print()}</script>
+</body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
+
   return (
     <div className="rounded-2xl overflow-hidden mt-6" style={{ border: "1px solid rgba(0,255,136,0.2)" }}>
       {/* Заголовок */}
@@ -1310,6 +1399,12 @@ function FullVorTable({ rows, onPriceChange, token }: {
               }}>
               <Icon name={showPrices ? "EyeOff" : "Eye"} size={12} />
               {showPrices ? "Скрыть цены" : "Ввести цены"}
+            </button>
+            <button onClick={printEstimate}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.12)" }}>
+              <Icon name="Printer" size={12} />
+              Печать
             </button>
           </div>
         </div>
