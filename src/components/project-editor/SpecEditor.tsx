@@ -129,6 +129,106 @@ export default function SpecEditor({ project, token, role, pendingImport, onPend
     setShowHistory(true);
   };
 
+  const printSpec = () => {
+    if (!spec) return;
+    const sections = Array.from(new Set(spec.items.map(i => i.section)));
+    const grandTotal = spec.items.reduce((s, i) => s + i.total_price, 0);
+    const date = new Date().toLocaleDateString("ru-RU");
+
+    const sectionRows = sections.map(section => {
+      const items = spec.items.filter(i => i.section === section);
+      const sTotal = items.reduce((s, i) => s + i.total_price, 0);
+      return `
+        <tr class="section-header">
+          <td colspan="6">${section}</td>
+        </tr>
+        ${items.map((item, idx) => `
+          <tr class="${idx % 2 ? 'row-even' : ''}">
+            <td>${item.name}</td>
+            <td class="center">${item.unit}</td>
+            <td class="right">${fmt(item.qty)}</td>
+            <td class="right">${fmt(item.price_per_unit)}</td>
+            <td class="right bold">${fmt(item.total_price)}</td>
+            <td>${item.note || ''}</td>
+          </tr>
+        `).join('')}
+        <tr class="section-total">
+          <td colspan="4" class="right">Итого по разделу «${section}»:</td>
+          <td class="right bold">${fmt(sTotal)}</td>
+          <td></td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>ВОР — ${project.name}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm 10mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; }
+  .header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+  .header h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .header .meta { font-size: 11px; color: #555; }
+  .header .meta span { margin-right: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f0f0f0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+       padding: 6px 8px; border: 1px solid #ccc; text-align: left; font-weight: 700; }
+  td { padding: 5px 8px; border: 1px solid #ddd; font-size: 11px; vertical-align: top; }
+  .section-header td { background: #e8e8e8; font-weight: 700; font-size: 11px; padding: 6px 8px; }
+  .section-total td { background: #f5f5f5; font-size: 11px; border-top: 2px solid #bbb; }
+  .row-even td { background: #fafafa; }
+  .center { text-align: center; }
+  .right { text-align: right; }
+  .bold { font-weight: 700; }
+  .grand-total { margin-top: 12px; padding: 10px; text-align: right; font-size: 16px; font-weight: 700;
+                 border-top: 3px solid #333; }
+  .footer { margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #888; }
+  .signatures { margin-top: 40px; display: flex; gap: 60px; }
+  .sig-block { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: 10px; color: #555; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head><body>
+<div class="header">
+  <h1>ВЕДОМОСТЬ ОБЪЁМОВ РАБОТ</h1>
+  <div class="meta">
+    <span>Проект: <b>${project.name}</b></span>
+    <span>Площадь: <b>${project.area} м²</b></span>
+    <span>Этажей: <b>${project.floors}</b></span>
+    <span>Тип: <b>${project.type}</b></span>
+    <span>Версия: <b>${spec.version}</b></span>
+    <span>Статус: <b>${spec.status === "approved" ? "Утверждена" : "Черновик"}</b></span>
+    <span>Дата: <b>${date}</b></span>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:35%">Наименование</th>
+      <th style="width:7%" class="center">Ед. изм.</th>
+      <th style="width:10%" class="right">Кол-во</th>
+      <th style="width:13%" class="right">Цена/ед., ₽</th>
+      <th style="width:13%" class="right">Сумма, ₽</th>
+      <th style="width:22%">Примечание</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${sectionRows}
+  </tbody>
+</table>
+<div class="grand-total">ИТОГО: ${fmt(grandTotal)} ₽</div>
+<div class="signatures">
+  <div class="sig-block">Составил (архитектор): _______________</div>
+  <div class="sig-block">Проверил: _______________</div>
+  <div class="sig-block">Утвердил: _______________</div>
+</div>
+<script>window.onload=function(){window.print()}</script>
+</body></html>`;
+
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
+
   const downloadPDF = async () => {
     if (!spec) return;
     setGeneratingPDF(true);
@@ -280,6 +380,11 @@ export default function SpecEditor({ project, token, role, pendingImport, onPend
               <Icon name="Check" size={12} /> Утвердить
             </button>
           )}
+          <button onClick={printSpec}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <Icon name="Printer" size={12} /> Печать
+          </button>
           <button onClick={downloadPDF} disabled={generatingPDF}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
             style={{ background: "var(--neon-orange)", color: "#fff" }}>
